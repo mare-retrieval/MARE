@@ -82,7 +82,7 @@ pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"
 The intended package install after PyPI release is:
 
 ```bash
-pip install mare
+pip install mare-retrieval
 ```
 
 Then use it as a library:

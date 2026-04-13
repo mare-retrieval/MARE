@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 
 setup(
-    name="mare",
+    name="mare-retrieval",
     version="0.2.0",
     description="Modality-Aware Retrieval Engine inspired by IRPAPERS-style multimodal retrieval.",
     package_dir={"": "src"},

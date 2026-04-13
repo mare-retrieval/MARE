@@ -3,7 +3,7 @@ requires = ["setuptools>=58"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mare"
+name = "mare-retrieval"
 version = "0.2.0"
 description = "Modality-Aware Retrieval Engine inspired by IRPAPERS-style multimodal retrieval."
 readme = "README.md"

@@ -53,11 +53,11 @@ It will publish when:
 Once published, users will be able to install with:
 
 ```bash
-pip install mare
+pip install mare-retrieval
 ```
 
 Optional UI extras:
 
 ```bash
-pip install "mare[ui]"
+pip install "mare-retrieval[ui]"
 ```
