@@ -3,9 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mare.demo import load_documents
-from mare.engine import MAREngine
-from mare.ingest import ingest_pdf
+from mare.api import load_pdf
 
 
 def _default_output_path(pdf_path: Path) -> Path:
@@ -31,15 +29,9 @@ def _print_answer_block(query: str, corpus_path: Path, explanation) -> None:
 
 
 def ask_pdf(pdf_path: Path, query: str, top_k: int = 3, reuse: bool = False):
-    output_path = _default_output_path(pdf_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not reuse or not output_path.exists():
-        ingest_pdf(pdf_path=pdf_path, output_path=output_path)
-
-    documents = load_documents(output_path)
-    engine = MAREngine(documents)
-    explanation = engine.explain(query, top_k=top_k)
+    app = load_pdf(pdf_path=pdf_path, output_path=_default_output_path(pdf_path), reuse=reuse)
+    explanation = app.explain(query, top_k=top_k)
+    output_path = app.corpus_path or _default_output_path(pdf_path)
     return output_path, explanation
 
 

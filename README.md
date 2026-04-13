@@ -1,12 +1,12 @@
 # MARE
 
-MARE is a small open-source starting point for modality-aware retrieval.
+MARE is an open-source Python library for evidence-first document retrieval.
 
 It is inspired by the direction highlighted in the IRPAPERS paper, which shows that page-image retrieval and text retrieval have complementary failure modes on scientific documents. Instead of flattening everything into one retrieval path, MARE treats routing, retrieval, fusion, and observability as separate system concerns.
 
 ## What this repo is
 
-- A lightweight retrieval layer between a query and modality-specific indexes
+- A lightweight Python package between a query and modality-specific indexes
 - A baseline router that decides whether a query should hit text, image, layout, or a hybrid path
 - A late-fusion layer that combines modality-specific scores
 - An explainable debug surface that tells you why a modality was selected
@@ -63,7 +63,7 @@ tests/
 
 ## Quickstart
 
-Clone and run:
+Clone and install:
 
 ```bash
 git clone https://github.com/SaiSandeepKantareddy/MARE.git
@@ -73,7 +73,26 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Then try the sample corpus:
+Or install directly from GitHub:
+
+```bash
+pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"
+```
+
+Then use it as a library:
+
+```python
+from mare import MAREApp
+
+app = MAREApp.from_pdf("manual.pdf", reuse=True)
+best = app.best_match("partially reinstall the set screws if they fall out")
+
+print(best.page)
+print(best.snippet)
+print(best.page_image_path)
+```
+
+Or try the sample corpus from the CLI:
 
 ```bash
 mare-demo --query "show me the architecture diagram of transformer"
@@ -113,6 +132,37 @@ If the PDF filename is awkward, rename it first:
 mv ./*.pdf ./manual.pdf
 PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws if they fall out"
 ```
+
+## Public Python API
+
+The package is meant to be importable, not just runnable from scripts.
+
+```python
+from mare import MAREApp, load_corpus, load_pdf
+```
+
+Create an app from a PDF:
+
+```python
+app = load_pdf("manual.pdf", reuse=True)
+hit = app.best_match("what does MagSafe 3 refer to")
+```
+
+Create an app from an existing JSON corpus:
+
+```python
+app = load_corpus("generated/manual.json")
+results = app.retrieve("show me the comparison table", top_k=3)
+```
+
+Core methods:
+
+- `MAREApp.from_pdf(...)`
+- `MAREApp.from_corpus(...)`
+- `MAREApp.from_documents(...)`
+- `app.explain(query)`
+- `app.retrieve(query)`
+- `app.best_match(query)`
 
 ## Visual demo
 

@@ -53,10 +53,38 @@ def test_ask_pdf_reuses_existing_corpus(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("mare.ask._default_output_path", lambda _path: corpus_path)
 
-    def _fail_ingest(*args, **kwargs):
-        raise AssertionError("ingest should not be called when reuse=True and corpus exists")
+    explanation = RetrievalExplanation(
+        plan=QueryPlan(
+            query="set screws",
+            selected_modalities=[Modality.TEXT],
+            discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+            confidence=0.7,
+            intent="semantic_lookup",
+            rationale="test",
+        ),
+        per_modality_results={},
+        fused_results=[
+            RetrievalHit(
+                doc_id="1",
+                title="Manual",
+                page=1,
+                modality=Modality.TEXT,
+                score=0.8,
+                reason="Matched text terms: set, screws",
+                snippet="set screws instructions",
+                page_image_path="generated/manual/page-1.png",
+            )
+        ],
+    )
 
-    monkeypatch.setattr("mare.ask.ingest_pdf", _fail_ingest)
+    class _FakeApp:
+        def __init__(self) -> None:
+            self.corpus_path = corpus_path
+
+        def explain(self, query: str, top_k: int = 3):
+            return explanation
+
+    monkeypatch.setattr("mare.ask.load_pdf", lambda *args, **kwargs: _FakeApp())
 
     output_path, explanation = ask_pdf(pdf_path=pdf_path, query="set screws", reuse=True)
 
