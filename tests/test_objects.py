@@ -31,3 +31,18 @@ def test_extract_document_objects_supports_inline_numbered_manual_steps() -> Non
     assert len(procedures) >= 2
     assert procedures[0].content.startswith("1 Connect")
     assert procedures[1].content.startswith("2 Connect")
+
+
+def test_extract_document_objects_creates_grouped_procedure_for_heading_pages() -> None:
+    text = (
+        "Wake on LAN (WOL) feature "
+        "1 Open settings. "
+        "2 Right-click Ethernet. "
+        "3 Select Configure. "
+        "4 Restart the computer."
+    )
+    objects = extract_document_objects(text, doc_id="doc-1", page=61)
+    grouped = [obj for obj in objects if obj.metadata.get("grouped") == "true"]
+
+    assert grouped
+    assert "Wake on LAN" in grouped[0].content

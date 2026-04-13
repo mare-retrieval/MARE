@@ -6,3 +6,4 @@ build/
 *.pyc
 generated/
 *.egg-info/
+.DS_Store

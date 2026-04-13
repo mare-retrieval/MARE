@@ -63,6 +63,57 @@ def _extract_procedures(page_text: str, doc_id: str, page: int) -> list[Document
     return objects
 
 
+def _find_heading(text: str) -> str:
+    normalized = _normalize(text)
+    if not normalized:
+        return ""
+
+    candidates = [
+        r"(Wake on LAN \(WOL\) feature)",
+        r"(Wired LAN)",
+        r"(Wireless LAN)",
+        r"(Connecting the AC adapter)",
+        r"(Turning off(?: on [^.]+)?)",
+        r"(Turning the computer on and off)",
+    ]
+    for pattern in candidates:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    heading_match = re.match(r"(?:[A-Za-z& ]+\s+\d+\s+)?([A-Z][A-Za-z0-9&() /+-]{6,60})", normalized)
+    if heading_match:
+        heading = heading_match.group(1).strip()
+        if len(heading.split()) <= 10:
+            return heading
+    return ""
+
+
+def _extract_procedure_groups(page_text: str, doc_id: str, page: int, procedure_objects: list[DocumentObject]) -> list[DocumentObject]:
+    if len(procedure_objects) < 2:
+        return []
+
+    heading = _find_heading(page_text)
+    if not heading:
+        return []
+
+    grouped_text = " ".join(obj.content for obj in procedure_objects)
+    grouped_text = _normalize(f"{heading}. {grouped_text}")
+    if len(grouped_text) < 40:
+        return []
+
+    return [
+        DocumentObject(
+            object_id=f"{doc_id}:procedure_group:{page}:1",
+            doc_id=doc_id,
+            page=page,
+            object_type=ObjectType.PROCEDURE,
+            content=grouped_text,
+            metadata={"grouped": "true", "heading": heading},
+        )
+    ]
+
+
 def _extract_figures(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
     objects: list[DocumentObject] = []
     for idx, sentence in enumerate(_split_sentences(page_text), start=1):
@@ -123,7 +174,9 @@ def _extract_sections(page_text: str, doc_id: str, page: int) -> list[DocumentOb
 
 def extract_document_objects(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
     objects: list[DocumentObject] = []
-    objects.extend(_extract_procedures(page_text, doc_id, page))
+    procedure_objects = _extract_procedures(page_text, doc_id, page)
+    objects.extend(procedure_objects)
+    objects.extend(_extract_procedure_groups(page_text, doc_id, page, procedure_objects))
     objects.extend(_extract_figures(page_text, doc_id, page))
     objects.extend(_extract_tables(page_text, doc_id, page))
     objects.extend(_extract_sections(page_text, doc_id, page))

@@ -138,6 +138,11 @@ def _object_bonus(query_tokens: set[str], obj: DocumentObject) -> tuple[float, l
     }:
         bonus += 0.2
         reasons.append("procedure-object boost")
+    if obj.metadata.get("grouped") == "true":
+        heading_tokens = set(_content_tokens(obj.metadata.get("heading", "")))
+        if query_tokens & heading_tokens:
+            bonus += 0.3
+            reasons.append("grouped-heading boost")
     if obj.object_type == ObjectType.FIGURE and query_tokens & {"figure", "diagram", "architecture"}:
         bonus += 0.2
         reasons.append("figure-object boost")
