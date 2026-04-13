@@ -1,5 +1,9 @@
 # MARE
 
+[![PyPI version](https://img.shields.io/pypi/v/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
+[![Publish to PyPI](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml)
+
 MARE is an open-source Python library for evidence-first document retrieval.
 
 It is inspired by the direction highlighted in the IRPAPERS paper, which shows that page-image retrieval and text retrieval have complementary failure modes on scientific documents. Instead of flattening everything into one retrieval path, MARE treats routing, retrieval, fusion, and observability as separate system concerns.
