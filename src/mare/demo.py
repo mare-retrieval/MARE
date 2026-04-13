@@ -5,12 +5,27 @@ import json
 from pathlib import Path
 
 from mare.engine import MAREngine
-from mare.types import Document
+from mare.types import Document, DocumentObject, ObjectType
 
 
 def load_documents(path: Path) -> list[Document]:
     payload = json.loads(path.read_text())
-    return [Document(**item) for item in payload["documents"]]
+    documents: list[Document] = []
+    for item in payload["documents"]:
+        raw_objects = item.get("objects", [])
+        item["objects"] = [
+            DocumentObject(
+                object_id=obj["object_id"],
+                doc_id=obj["doc_id"],
+                page=obj["page"],
+                object_type=ObjectType(obj["object_type"]),
+                content=obj["content"],
+                metadata=obj.get("metadata", {}),
+            )
+            for obj in raw_objects
+        ]
+        documents.append(Document(**item))
+    return documents
 
 
 def main() -> None:
@@ -47,6 +62,8 @@ def main() -> None:
                         "snippet": hit.snippet,
                         "page_image_path": hit.page_image_path,
                         "highlight_image_path": hit.highlight_image_path,
+                        "object_id": hit.object_id,
+                        "object_type": hit.object_type,
                     }
                     for hit in explanation.fused_results
                 ],

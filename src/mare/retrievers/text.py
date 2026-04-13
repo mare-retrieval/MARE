@@ -6,7 +6,7 @@ from collections import Counter
 
 from mare.highlight import render_highlighted_page
 from mare.retrievers.base import BaseRetriever
-from mare.types import Modality, RetrievalHit
+from mare.types import DocumentObject, Modality, ObjectType, RetrievalHit
 
 STOPWORDS = {
     "a",
@@ -120,6 +120,61 @@ def _structure_bonus(query_tokens: set[str], document) -> tuple[float, list[str]
     return bonus, reasons
 
 
+def _object_bonus(query_tokens: set[str], obj: DocumentObject) -> tuple[float, list[str]]:
+    bonus = 0.0
+    reasons: list[str] = []
+
+    if obj.object_type == ObjectType.TABLE and query_tokens & {"table", "comparison", "compare"}:
+        bonus += 0.25
+        reasons.append("table-object boost")
+    if obj.object_type == ObjectType.PROCEDURE and query_tokens & {
+        "install",
+        "reinstall",
+        "remove",
+        "loosen",
+        "tighten",
+        "step",
+        "instruction",
+    }:
+        bonus += 0.2
+        reasons.append("procedure-object boost")
+    if obj.object_type == ObjectType.FIGURE and query_tokens & {"figure", "diagram", "architecture"}:
+        bonus += 0.2
+        reasons.append("figure-object boost")
+
+    return bonus, reasons
+
+
+def _score_object(query_tokens: list[str], obj: DocumentObject) -> tuple[float, list[str], set[str]]:
+    content_tokens = _content_tokens(obj.content)
+    overlap = set(query_tokens) & set(content_tokens)
+    if not overlap:
+        return 0.0, [], set()
+
+    avg_len = max(len(content_tokens), 1)
+    bm25_score = _bm25_score(query_tokens, content_tokens, avg_len)
+    bonus, reasons = _object_bonus(set(query_tokens), obj)
+    score = min(1.0, (0.45 * min(1.0, bm25_score / 6.0)) + bonus + (0.08 * len(overlap)))
+    return score, reasons, overlap
+
+
+def _best_object(query_tokens: list[str], objects: list[DocumentObject]) -> tuple[DocumentObject | None, float, list[str], set[str]]:
+    best_object: DocumentObject | None = None
+    best_score = 0.0
+    best_reasons: list[str] = []
+    best_overlap: set[str] = set()
+
+    for obj in objects:
+        score, reasons, overlap = _score_object(query_tokens, obj)
+        if score > best_score:
+            best_object = obj
+            best_score = score
+            best_reasons = reasons
+            best_overlap = overlap
+
+    return best_object, best_score, best_reasons, best_overlap
+
+
 class TextRetriever(BaseRetriever):
     modality = Modality.TEXT
 
@@ -133,19 +188,31 @@ class TextRetriever(BaseRetriever):
             doc_tokens = _content_tokens(document.text)
             doc_counts = Counter(doc_tokens)
             overlap = set(query_counts) & set(doc_counts)
-            if not overlap:
+            best_object, object_score, object_bonus_reasons, object_overlap = _best_object(query_tokens, document.objects)
+            if not overlap and not object_overlap:
                 continue
 
-            numerator = sum(query_counts[token] * doc_counts[token] for token in overlap)
-            norm = math.sqrt(sum(v * v for v in query_counts.values())) * math.sqrt(
-                sum(v * v for v in doc_counts.values())
-            )
-            cosine_score = numerator / norm if norm else 0.0
-            bm25_score = _bm25_score(query_tokens, doc_tokens, avg_doc_len)
+            cosine_score = 0.0
+            bm25_score = 0.0
+            reason_parts: list[str] = []
+            if overlap:
+                numerator = sum(query_counts[token] * doc_counts[token] for token in overlap)
+                norm = math.sqrt(sum(v * v for v in query_counts.values())) * math.sqrt(
+                    sum(v * v for v in doc_counts.values())
+                )
+                cosine_score = numerator / norm if norm else 0.0
+                bm25_score = _bm25_score(query_tokens, doc_tokens, avg_doc_len)
+                reason_parts.append(f"Matched text terms: {', '.join(sorted(overlap)[:5])}")
+
             structure_bonus, bonus_reasons = _structure_bonus(set(query_tokens), document)
-            score = (0.55 * cosine_score) + (0.25 * min(1.0, bm25_score / 8.0)) + structure_bonus
-            snippet = _best_snippet(document.text, query)
-            reason_parts = [f"Matched text terms: {', '.join(sorted(overlap)[:5])}"]
+            score = (0.45 * cosine_score) + (0.2 * min(1.0, bm25_score / 8.0)) + structure_bonus + object_score
+            snippet = best_object.content if best_object else _best_snippet(document.text, query)
+            if best_object:
+                reason_parts.append(
+                    f"Best object: {best_object.object_type.value} ({', '.join(sorted(object_overlap)[:5])})"
+                )
+                if object_bonus_reasons:
+                    reason_parts.append(f"Object boosts: {', '.join(object_bonus_reasons)}")
             if bonus_reasons:
                 reason_parts.append(f"Structure boosts: {', '.join(bonus_reasons)}")
             hits.append(
@@ -158,6 +225,8 @@ class TextRetriever(BaseRetriever):
                     reason=" | ".join(reason_parts),
                     snippet=snippet,
                     page_image_path=document.page_image_path,
+                    object_id=best_object.object_id if best_object else "",
+                    object_type=best_object.object_type.value if best_object else "",
                     metadata=document.metadata,
                 )
             )

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mare.objects import extract_document_objects
 from mare.types import Document
 
 
@@ -112,6 +113,7 @@ def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> d
                 image_caption="",
                 layout_hints=_infer_layout_hints(text),
                 page_image_path=page_images[idx - 1] if idx - 1 < len(page_images) else "",
+                objects=extract_document_objects(raw_text, f"{pdf_file.stem.lower().replace(' ', '-')}-p{idx}", idx),
                 metadata={
                     "source": str(pdf_file),
                     "collection": "pdf-ingest",
@@ -131,6 +133,17 @@ def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> d
                 "image_caption": doc.image_caption,
                 "layout_hints": doc.layout_hints,
                 "page_image_path": doc.page_image_path,
+                "objects": [
+                    {
+                        "object_id": obj.object_id,
+                        "doc_id": obj.doc_id,
+                        "page": obj.page,
+                        "object_type": obj.object_type.value,
+                        "content": obj.content,
+                        "metadata": obj.metadata,
+                    }
+                    for obj in doc.objects
+                ],
                 "metadata": doc.metadata,
             }
             for doc in documents

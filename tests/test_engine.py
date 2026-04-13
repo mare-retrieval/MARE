@@ -1,5 +1,5 @@
 from mare.engine import MAREngine
-from mare.types import Document, Modality
+from mare.types import Document, DocumentObject, Modality, ObjectType
 
 
 def _docs() -> list[Document]:
@@ -54,6 +54,15 @@ def test_procedure_queries_get_structure_boost_reason() -> None:
             page=1,
             text="1. Use the driver to partially reinstall the set screws in the top case.",
             page_image_path="generated/repair/page-1.png",
+            objects=[
+                DocumentObject(
+                    object_id="1:procedure:1",
+                    doc_id="1",
+                    page=1,
+                    object_type=ObjectType.PROCEDURE,
+                    content="1. Use the driver to partially reinstall the set screws in the top case.",
+                )
+            ],
             metadata={"signals": "procedure instruction"},
         ),
         Document(
@@ -67,4 +76,5 @@ def test_procedure_queries_get_structure_boost_reason() -> None:
     engine = MAREngine(docs)
     explanation = engine.explain("partially reinstall the set screws", top_k=2)
     assert explanation.fused_results[0].doc_id == "1"
+    assert explanation.fused_results[0].object_type == "procedure"
     assert "structure boosts" in explanation.fused_results[0].reason.lower()

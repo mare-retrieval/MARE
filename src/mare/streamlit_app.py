@@ -95,9 +95,27 @@ def _render_candidate(st, hit, rank: int) -> None:
         <div class="mare-card">
           <div class="mare-label">Candidate {rank}</div>
           <div class="mare-value">Page {hit.page}</div>
+          <p class="mare-mini"><strong>Object type:</strong> {hit.object_type or 'page'}</p>
           <p class="mare-mini"><strong>Score:</strong> {hit.score}</p>
           <p class="mare-mini"><strong>Reason:</strong> {hit.reason}</p>
           <p class="mare-mini"><strong>Snippet:</strong> {hit.snippet or '[no snippet available]'}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_object_preview(st, explanation) -> None:
+    best = explanation.fused_results[0]
+    object_type = best.object_type or "page"
+    st.markdown(
+        f"""
+        <div class="mare-card">
+          <div class="mare-label">Retrieved Object</div>
+          <div class="mare-value">{object_type}</div>
+          <p class="mare-mini" style="margin-top:0.7rem;">
+            This is the evidence unit MARE believes best answers the query before mapping back to the page.
+          </p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -226,7 +244,7 @@ def main() -> None:
     with metric_cols[2]:
         _render_metric_card(st, "Modality", ", ".join(item.value for item in explanation.plan.selected_modalities))
     with metric_cols[3]:
-        _render_metric_card(st, "Confidence", f"{explanation.plan.confidence:.2f}")
+        _render_metric_card(st, "Object", best.object_type or "page")
 
     left, right = st.columns([0.92, 1.08])
 
@@ -234,6 +252,7 @@ def main() -> None:
         st.subheader("Answer Evidence")
         st.markdown(f"**Best page:** {best.page}")
         st.markdown(f"**Score:** {best.score}")
+        st.markdown(f"**Object type:** {best.object_type or 'page'}")
         st.markdown(f"**Why it matched:** {best.reason}")
         st.markdown("**Snippet**")
         st.markdown(
@@ -260,6 +279,24 @@ def main() -> None:
             st.image(str(image_path), caption=caption, use_column_width=True)
         else:
             st.warning("No page image available.")
+
+    preview_left, preview_right = st.columns([0.7, 1.3])
+    with preview_left:
+        _render_object_preview(st, explanation)
+    with preview_right:
+        st.markdown(
+            """
+            <div class="mare-card">
+              <div class="mare-label">What MARE Is Doing</div>
+              <p class="mare-mini">
+                MARE now retrieves evidence at the object level when possible. Instead of only searching whole pages,
+                it can match procedure-like blocks, figure mentions, table mentions, and section chunks, then map the
+                winning object back to the page image.
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     if len(explanation.fused_results) > 1:
         st.subheader("Other Candidate Pages")

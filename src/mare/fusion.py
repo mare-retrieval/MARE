@@ -25,6 +25,8 @@ class WeightedScoreFusion:
                 "snippet": "",
                 "page_image_path": "",
                 "highlight_image_path": "",
+                "object_id": "",
+                "object_type": "",
                 "metadata": {},
             }
         )
@@ -43,6 +45,10 @@ class WeightedScoreFusion:
                     bucket["page_image_path"] = hit.page_image_path
                 if not bucket["highlight_image_path"] and hit.highlight_image_path:
                     bucket["highlight_image_path"] = hit.highlight_image_path
+                if not bucket["object_id"] and hit.object_id:
+                    bucket["object_id"] = hit.object_id
+                if not bucket["object_type"] and hit.object_type:
+                    bucket["object_type"] = hit.object_type
                 bucket["metadata"] = hit.metadata
 
         fused: list[RetrievalHit] = []
@@ -58,6 +64,8 @@ class WeightedScoreFusion:
                     snippet=str(payload["snippet"]),
                     page_image_path=str(payload["page_image_path"]),
                     highlight_image_path=str(payload["highlight_image_path"]),
+                    object_id=str(payload["object_id"]),
+                    object_type=str(payload["object_type"]),
                     metadata=dict(payload["metadata"]),
                 )
             )
