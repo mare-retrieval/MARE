@@ -34,6 +34,7 @@ def test_router_prefers_layout_for_table_query() -> None:
     engine = MAREngine(_docs())
     explanation = engine.explain("table comparing retrieval models", top_k=2)
     assert Modality.LAYOUT in explanation.plan.selected_modalities
+    assert Modality.TEXT in explanation.plan.selected_modalities
     assert explanation.fused_results[0].doc_id == "2"
 
 
@@ -43,3 +44,27 @@ def test_text_query_defaults_to_semantic_lookup() -> None:
     assert explanation.plan.intent == "semantic_lookup"
     assert explanation.fused_results[0].doc_id == "1"
     assert "positional encoding" in explanation.fused_results[0].snippet.lower()
+
+
+def test_procedure_queries_get_structure_boost_reason() -> None:
+    docs = [
+        Document(
+            doc_id="1",
+            title="Repair",
+            page=1,
+            text="1. Use the driver to partially reinstall the set screws in the top case.",
+            page_image_path="generated/repair/page-1.png",
+            metadata={"signals": "procedure instruction"},
+        ),
+        Document(
+            doc_id="2",
+            title="Background",
+            page=2,
+            text="Set screws are components used in many repair procedures.",
+            page_image_path="generated/repair/page-2.png",
+        ),
+    ]
+    engine = MAREngine(docs)
+    explanation = engine.explain("partially reinstall the set screws", top_k=2)
+    assert explanation.fused_results[0].doc_id == "1"
+    assert "structure boosts" in explanation.fused_results[0].reason.lower()

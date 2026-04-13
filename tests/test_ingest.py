@@ -37,5 +37,7 @@ def test_ingest_pdf_writes_page_level_corpus(tmp_path: Path, monkeypatch) -> Non
     assert payload["documents"][0]["page"] == 1
     assert payload["documents"][0]["layout_hints"] == "figure abstract"
     assert payload["documents"][0]["page_image_path"].endswith("page-1.png")
+    assert payload["documents"][0]["metadata"]["signals"] == "figure"
     assert payload["documents"][1]["layout_hints"] == "table"
+    assert payload["documents"][1]["metadata"]["signals"] == "table comparison"
     assert output_path.exists()

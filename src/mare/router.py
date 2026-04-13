@@ -60,6 +60,8 @@ class HeuristicModalityRouter:
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
         top_score = ranked[0][1]
         selected = [modality for modality, score in ranked if score > 0 and score >= top_score - 1]
+        if Modality.LAYOUT in selected and Modality.TEXT not in selected:
+            selected.append(Modality.TEXT)
         discarded = [modality for modality in Modality if modality not in selected]
 
         intent = "visual_lookup" if Modality.IMAGE in selected else "structured_lookup"
@@ -82,4 +84,3 @@ class HeuristicModalityRouter:
             intent=intent,
             rationale=rationale,
         )
-

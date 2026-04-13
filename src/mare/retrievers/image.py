@@ -49,11 +49,18 @@ class LayoutRetriever(BaseRetriever):
         hits: list[RetrievalHit] = []
 
         for document in self.documents:
-            overlap = _shared_terms(query, document.layout_hints)
+            layout_overlap = _shared_terms(query, document.layout_hints)
+            signal_overlap = _shared_terms(query, document.metadata.get("signals", ""))
+            overlap = layout_overlap | signal_overlap
             if not overlap:
                 continue
 
-            score = min(1.0, 0.25 * len(overlap))
+            score = min(1.0, (0.22 * len(layout_overlap)) + (0.18 * len(signal_overlap)))
+            reason_parts: list[str] = []
+            if layout_overlap:
+                reason_parts.append(f"Matched layout cues: {', '.join(sorted(layout_overlap)[:5])}")
+            if signal_overlap:
+                reason_parts.append(f"Matched page signals: {', '.join(sorted(signal_overlap)[:5])}")
             hits.append(
                 RetrievalHit(
                     doc_id=document.doc_id,
@@ -61,8 +68,8 @@ class LayoutRetriever(BaseRetriever):
                     page=document.page,
                     modality=self.modality,
                     score=score,
-                    reason=f"Matched layout cues: {', '.join(sorted(overlap)[:5])}",
-                    snippet=document.layout_hints,
+                    reason=" | ".join(reason_parts),
+                    snippet=document.layout_hints or document.metadata.get("signals", ""),
                     page_image_path=document.page_image_path,
                     highlight_image_path=document.page_image_path,
                     metadata=document.metadata,

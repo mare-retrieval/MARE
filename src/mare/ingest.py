@@ -50,6 +50,24 @@ def _infer_layout_hints(text: str) -> str:
     return " ".join(hints)
 
 
+def _infer_page_signals(text: str) -> str:
+    lowered = text.lower()
+    signals: list[str] = []
+
+    if "table" in lowered:
+        signals.append("table")
+    if "figure" in lowered or "fig." in lowered or "diagram" in lowered:
+        signals.append("figure")
+    if re.search(r"(^|\s)\d+\.", lowered):
+        signals.append("procedure")
+    if any(term in lowered for term in ("compare", "comparison", "versus", "vs.")):
+        signals.append("comparison")
+    if any(term in lowered for term in ("install", "reinstall", "remove", "loosen", "tighten", "use the")):
+        signals.append("instruction")
+
+    return " ".join(signals)
+
+
 def _render_page_images(pdf_path: Path, image_dir: Path, scale: float = 1.5) -> list[str]:
     pdfium = _require_pdf_renderer()
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +112,7 @@ def ingest_pdf(pdf_path: str | Path, output_path: str | Path | None = None) -> d
                 metadata={
                     "source": str(pdf_file),
                     "collection": "pdf-ingest",
+                    "signals": _infer_page_signals(text),
                 },
             )
         )
