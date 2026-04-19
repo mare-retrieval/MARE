@@ -189,6 +189,67 @@ Core methods:
 - `app.retrieve(query)`
 - `app.best_match(query)`
 
+## Developer-friendly extension points
+
+MARE is designed to be usable out of the box, but it should also be easy to improve on a bigger machine or inside an existing AI stack.
+
+Today you can plug in:
+
+- a custom PDF parser
+- custom retriever factories per modality
+- a second-stage reranker
+
+That means developers can keep MARE's API and UI while swapping in stronger components.
+
+```python
+from pathlib import Path
+
+from mare import MAREApp, MAREConfig, Modality
+
+
+class MyParser:
+    def ingest(self, pdf_path: Path, output_path: Path) -> Path:
+        # Build a MARE-compatible corpus here using your preferred parser.
+        ...
+        return output_path
+
+
+class MyReranker:
+    def rerank(self, query, hits, top_k=5):
+        # Reorder fused hits using your favorite cross-encoder or API.
+        return hits[:top_k]
+
+
+class MyTextRetriever:
+    def __init__(self, documents):
+        self.documents = documents
+
+    def retrieve(self, query, top_k=5):
+        ...
+
+
+config = MAREConfig(
+    reranker=MyReranker(),
+    retriever_factories={
+        Modality.TEXT: lambda documents: MyTextRetriever(documents),
+    },
+)
+
+app = MAREApp.from_pdf("manual.pdf", parser=MyParser(), config=config)
+best = app.best_match("how do I configure wake on lan")
+```
+
+Recommended upgrade paths for developers:
+
+- `Docling` for richer local document parsing, layout, OCR, and table structure
+- `Unstructured` for document partitioning and element extraction
+- `FastEmbed` for local dense and sparse embeddings
+- `Qdrant` for hybrid dense/sparse/multivector retrieval and reranking pipelines
+- `BGE-M3` for flexible dense + sparse retrieval setups
+- `ColPali` for page-image retrieval when visual structure matters
+
+MARE's job is to provide the retrieval framework and evidence-first UX. Better models and external systems should be able to plug into that foundation, not replace it.
+
 ## Packaging and release
 
 MARE is now structured as a regular Python package with:
