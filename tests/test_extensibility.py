@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mare import MAREApp
-from mare.extensions import MAREConfig
+from mare import IdentityReranker, KeywordBoostReranker, MAREApp
+from mare.extensions import MAREConfig, get_parser
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, Modality, RetrievalHit
 
@@ -88,3 +88,46 @@ def test_custom_reranker_can_reorder_fused_results() -> None:
 
     assert len(results) == 2
     assert results[0].doc_id == "2"
+
+
+def test_builtin_parsers_are_discoverable() -> None:
+    assert get_parser("builtin") is not None
+    assert get_parser("docling") is not None
+    assert get_parser("unstructured") is not None
+
+
+def test_identity_reranker_preserves_order() -> None:
+    hits = [
+        RetrievalHit(doc_id="1", title="A", page=1, modality=Modality.TEXT, score=0.9, reason="a"),
+        RetrievalHit(doc_id="2", title="B", page=2, modality=Modality.TEXT, score=0.8, reason="b"),
+    ]
+    reranked = IdentityReranker().rerank("adapter", hits, top_k=2)
+
+    assert [hit.doc_id for hit in reranked] == ["1", "2"]
+
+
+def test_keyword_boost_reranker_prefers_label_overlap() -> None:
+    hits = [
+        RetrievalHit(
+            doc_id="1",
+            title="Table",
+            page=1,
+            modality=Modality.TEXT,
+            score=0.6,
+            reason="table result",
+            snippet="comparison baseline",
+            metadata={"label": "Table 2"},
+        ),
+        RetrievalHit(
+            doc_id="2",
+            title="Section",
+            page=2,
+            modality=Modality.TEXT,
+            score=0.6,
+            reason="plain result",
+            snippet="plain text",
+        ),
+    ]
+    reranked = KeywordBoostReranker().rerank("comparison table", hits, top_k=2)
+
+    assert reranked[0].doc_id == "1"

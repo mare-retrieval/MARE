@@ -239,6 +239,13 @@ app = MAREApp.from_pdf("manual.pdf", parser=MyParser(), config=config)
 best = app.best_match("how do I configure wake on lan")
 ```
 
+Built-in extension helpers:
+
+- `BuiltinPDFParser` for the default local pipeline
+- `DoclingParser` and `UnstructuredParser` as integration stubs for richer parsing stacks
+- `IdentityReranker` as a no-op baseline
+- `KeywordBoostReranker` as a simple built-in reranker example
+
 Recommended upgrade paths for developers:
 
 - `Docling` for richer local document parsing, layout, OCR, and table structure
@@ -249,6 +256,21 @@ Recommended upgrade paths for developers:
 - `ColPali` for page-image retrieval when visual structure matters
 
 MARE's job is to provide the retrieval framework and evidence-first UX. Better models and external systems should be able to plug into that foundation, not replace it.
+
+### What this means in practice
+
+On a small local machine, you can use MARE with the built-in parser and retrievers.
+
+On a bigger machine or inside a production stack, you can upgrade pieces independently:
+
+- swap the parser for `Docling` or `Unstructured`
+- swap the text retriever for an embedding-backed retriever
+- add a cross-encoder reranker
+- later plug in a vector backend like `Qdrant`
+
+That is the intended habit MARE should create:
+
+start simple, then improve the stack without changing the application-facing API.
 
 ## Packaging and release
 
