@@ -16,6 +16,64 @@ def _split_sentences(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
 
 
+def _split_lines(text: str) -> list[str]:
+    lines = [line.strip() for line in text.splitlines()]
+    return [line for line in lines if line]
+
+
+def _region_hint(index: int, total: int) -> str:
+    if total <= 0:
+        return "unknown"
+    ratio = index / total
+    if ratio < 0.33:
+        return "top"
+    if ratio < 0.67:
+        return "middle"
+    return "bottom"
+
+
+def _estimate_columns(line: str) -> int:
+    if "|" in line:
+        return max(2, len([part for part in line.split("|") if part.strip()]))
+    if "\t" in line:
+        return max(2, len([part for part in line.split("\t") if part.strip()]))
+
+    parts = [part for part in re.split(r"\s{2,}", line) if part.strip()]
+    if len(parts) >= 2:
+        return len(parts)
+
+    return 1
+
+
+def _is_probable_caption(line: str) -> bool:
+    lowered = line.lower()
+    return bool(
+        re.match(r"^(figure|fig\.|diagram)\s*\d*", lowered)
+        or lowered.startswith("table ")
+        or lowered.startswith("fig. ")
+    )
+
+
+def _is_tabular_line(line: str) -> bool:
+    lowered = line.lower()
+    if re.match(r"^table\s+\d+", lowered):
+        return True
+    if "|" in line or "\t" in line:
+        return True
+    if re.search(r"\S\s{2,}\S", line) and _estimate_columns(line) >= 3:
+        return True
+    return False
+
+
+def _collect_block(lines: list[str], start_index: int, predicate) -> tuple[list[str], int]:
+    block: list[str] = []
+    index = start_index
+    while index < len(lines) and predicate(lines[index]):
+        block.append(lines[index])
+        index += 1
+    return block, index
+
+
 def _find_step_markers(page_text: str) -> list[tuple[int, str]]:
     markers: list[tuple[int, str]] = []
 
@@ -116,9 +174,47 @@ def _extract_procedure_groups(page_text: str, doc_id: str, page: int, procedure_
 
 def _extract_figures(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
     objects: list[DocumentObject] = []
+    lines = _split_lines(page_text)
+    if lines:
+        for idx, line in enumerate(lines, start=1):
+            lowered = line.lower()
+            if not (
+                re.match(r"^(figure|fig\.|diagram)\s*\d*", lowered)
+                or re.search(r"\bfigure\b", lowered)
+                or re.search(r"\bdiagram\b", lowered)
+            ):
+                continue
+
+            block = [line]
+            if idx < len(lines):
+                next_line = lines[idx]
+                if next_line and not _is_probable_caption(next_line) and not _is_tabular_line(next_line):
+                    block.append(next_line)
+
+            label_match = re.match(r"^((?:figure|fig\.|diagram)\s*\d*)", lowered)
+            label = label_match.group(1) if label_match else "figure"
+            objects.append(
+                DocumentObject(
+                    object_id=f"{doc_id}:figure:{page}:{idx}",
+                    doc_id=doc_id,
+                    page=page,
+                    object_type=ObjectType.FIGURE,
+                    content=_normalize(" ".join(block)),
+                    metadata={
+                        "label": label.title(),
+                        "region_hint": _region_hint(idx - 1, len(lines)),
+                        "block_lines": str(len(block)),
+                    },
+                )
+            )
+        if objects:
+            return objects
+
     for idx, sentence in enumerate(_split_sentences(page_text), start=1):
         lowered = sentence.lower()
         if re.search(r"\bfigure\b", lowered) or "fig." in lowered or re.search(r"\bdiagram\b", lowered):
+            label_match = re.search(r"((?:figure|fig\.|diagram)\s*\d*)", sentence, flags=re.IGNORECASE)
+            label = label_match.group(1) if label_match else "figure"
             objects.append(
                 DocumentObject(
                     object_id=f"{doc_id}:figure:{page}:{idx}",
@@ -126,6 +222,7 @@ def _extract_figures(page_text: str, doc_id: str, page: int) -> list[DocumentObj
                     page=page,
                     object_type=ObjectType.FIGURE,
                     content=sentence,
+                    metadata={"label": label.title(), "region_hint": "unknown", "block_lines": "1"},
                 )
             )
     return objects
@@ -133,9 +230,54 @@ def _extract_figures(page_text: str, doc_id: str, page: int) -> list[DocumentObj
 
 def _extract_tables(page_text: str, doc_id: str, page: int) -> list[DocumentObject]:
     objects: list[DocumentObject] = []
+    lines = _split_lines(page_text)
+    if lines:
+        index = 0
+        object_no = 1
+        while index < len(lines):
+            line = lines[index]
+            if not _is_tabular_line(line):
+                index += 1
+                continue
+
+            start_index = index
+            block, index = _collect_block(lines, index, _is_tabular_line)
+            if not block:
+                continue
+
+            content = _normalize(" ".join(block))
+            if len(content) < 20:
+                continue
+
+            label_match = re.match(r"^(table\s*\d*)", block[0], flags=re.IGNORECASE)
+            label = label_match.group(1).title() if label_match else "Table"
+            max_columns = max(_estimate_columns(item) for item in block)
+            if not label_match and (len(block) < 2 or max_columns < 3):
+                continue
+            objects.append(
+                DocumentObject(
+                    object_id=f"{doc_id}:table:{page}:{object_no}",
+                    doc_id=doc_id,
+                    page=page,
+                    object_type=ObjectType.TABLE,
+                    content=content,
+                    metadata={
+                        "label": label,
+                        "region_hint": _region_hint(start_index, len(lines)),
+                        "columns_estimate": str(max_columns),
+                        "block_lines": str(len(block)),
+                    },
+                )
+            )
+            object_no += 1
+        if objects:
+            return objects
+
     for idx, sentence in enumerate(_split_sentences(page_text), start=1):
         lowered = sentence.lower()
-        if re.search(r"\btable\b", lowered):
+        if re.match(r"^\s*table\s*\d+", lowered):
+            label_match = re.search(r"(table\s*\d*)", sentence, flags=re.IGNORECASE)
+            label = label_match.group(1).title() if label_match else "Table"
             objects.append(
                 DocumentObject(
                     object_id=f"{doc_id}:table:{page}:{idx}",
@@ -143,6 +285,7 @@ def _extract_tables(page_text: str, doc_id: str, page: int) -> list[DocumentObje
                     page=page,
                     object_type=ObjectType.TABLE,
                     content=sentence,
+                    metadata={"label": label, "region_hint": "unknown", "columns_estimate": "1", "block_lines": "1"},
                 )
             )
     return objects

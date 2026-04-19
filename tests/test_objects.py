@@ -46,3 +46,32 @@ def test_extract_document_objects_creates_grouped_procedure_for_heading_pages() 
 
     assert grouped
     assert "Wake on LAN" in grouped[0].content
+
+
+def test_extract_document_objects_extracts_table_blocks_with_metadata() -> None:
+    text = """
+    Table 2. Model comparison
+    Model    Recall    Latency
+    MARE     0.81      120ms
+    BM25     0.69      90ms
+    """
+    objects = extract_document_objects(text, doc_id="doc-1", page=7)
+    tables = [obj for obj in objects if obj.object_type == ObjectType.TABLE]
+
+    assert len(tables) == 1
+    assert "Model comparison" in tables[0].content
+    assert tables[0].metadata["label"] == "Table 2"
+    assert int(tables[0].metadata["columns_estimate"]) >= 3
+
+
+def test_extract_document_objects_extracts_figure_caption_blocks_with_metadata() -> None:
+    text = """
+    Figure 3. Retrieval pipeline overview
+    Dashed arrows show reranking between stages.
+    """
+    objects = extract_document_objects(text, doc_id="doc-1", page=4)
+    figures = [obj for obj in objects if obj.object_type == ObjectType.FIGURE]
+
+    assert len(figures) == 1
+    assert "Dashed arrows" in figures[0].content
+    assert figures[0].metadata["label"] == "Figure 3"

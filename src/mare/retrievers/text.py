@@ -123,10 +123,14 @@ def _structure_bonus(query_tokens: set[str], document) -> tuple[float, list[str]
 def _object_bonus(query_tokens: set[str], obj: DocumentObject) -> tuple[float, list[str]]:
     bonus = 0.0
     reasons: list[str] = []
+    label_tokens = set(_content_tokens(obj.metadata.get("label", "")))
 
     if obj.object_type == ObjectType.TABLE and query_tokens & {"table", "comparison", "compare"}:
         bonus += 0.25
         reasons.append("table-object boost")
+        if int(obj.metadata.get("columns_estimate", "1")) >= 3:
+            bonus += 0.08
+            reasons.append("multi-column table boost")
     if obj.object_type == ObjectType.PROCEDURE and query_tokens & {
         "install",
         "reinstall",
@@ -146,6 +150,9 @@ def _object_bonus(query_tokens: set[str], obj: DocumentObject) -> tuple[float, l
     if obj.object_type == ObjectType.FIGURE and query_tokens & {"figure", "diagram", "architecture"}:
         bonus += 0.2
         reasons.append("figure-object boost")
+    if label_tokens and query_tokens & label_tokens:
+        bonus += 0.08
+        reasons.append("label overlap boost")
 
     return bonus, reasons
 

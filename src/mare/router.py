@@ -62,6 +62,8 @@ class HeuristicModalityRouter:
         selected = [modality for modality, score in ranked if score > 0 and score >= top_score - 1]
         if Modality.LAYOUT in selected and Modality.TEXT not in selected:
             selected.append(Modality.TEXT)
+        if Modality.IMAGE in selected and Modality.TEXT not in selected and ("figure" in tokens or "diagram" in tokens):
+            selected.append(Modality.TEXT)
         discarded = [modality for modality in Modality if modality not in selected]
 
         intent = "visual_lookup" if Modality.IMAGE in selected else "structured_lookup"

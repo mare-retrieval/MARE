@@ -78,3 +78,71 @@ def test_procedure_queries_get_structure_boost_reason() -> None:
     assert explanation.fused_results[0].doc_id == "1"
     assert explanation.fused_results[0].object_type == "procedure"
     assert "structure boosts" in explanation.fused_results[0].reason.lower()
+
+
+def test_table_queries_prefer_table_object_evidence() -> None:
+    docs = [
+        Document(
+            doc_id="1",
+            title="Comparison",
+            page=3,
+            text="Table 2 compares retrieval models across recall and latency.",
+            layout_hints="table",
+            objects=[
+                DocumentObject(
+                    object_id="1:table:1",
+                    doc_id="1",
+                    page=3,
+                    object_type=ObjectType.TABLE,
+                    content="Table 2 compares retrieval models across recall and latency.",
+                    metadata={"label": "Table 2", "columns_estimate": "3"},
+                )
+            ],
+            metadata={"signals": "table comparison"},
+        ),
+        Document(
+            doc_id="2",
+            title="Narrative",
+            page=4,
+            text="This section discusses retrieval models and latency in prose form.",
+        ),
+    ]
+    engine = MAREngine(docs)
+    explanation = engine.explain("show me the comparison table", top_k=2)
+
+    assert explanation.fused_results[0].doc_id == "1"
+    assert explanation.fused_results[0].object_type == "table"
+
+
+def test_figure_queries_prefer_figure_object_evidence() -> None:
+    docs = [
+        Document(
+            doc_id="1",
+            title="Architecture",
+            page=5,
+            text="Figure 1 shows the retrieval architecture diagram.",
+            layout_hints="figure",
+            objects=[
+                DocumentObject(
+                    object_id="1:figure:1",
+                    doc_id="1",
+                    page=5,
+                    object_type=ObjectType.FIGURE,
+                    content="Figure 1 shows the retrieval architecture diagram.",
+                    metadata={"label": "Figure 1"},
+                )
+            ],
+            metadata={"signals": "figure"},
+        ),
+        Document(
+            doc_id="2",
+            title="Overview",
+            page=6,
+            text="The architecture is described in text only.",
+        ),
+    ]
+    engine = MAREngine(docs)
+    explanation = engine.explain("show me the architecture diagram", top_k=2)
+
+    assert explanation.fused_results[0].doc_id == "1"
+    assert explanation.fused_results[0].object_type == "figure"

@@ -129,11 +129,20 @@ def _render_page_objects(st, objects) -> None:
 
     st.subheader("Objects On This Page")
     for obj in objects:
+        metadata_parts = []
+        if obj.metadata.get("label"):
+            metadata_parts.append(f"label: {obj.metadata['label']}")
+        if obj.metadata.get("region_hint"):
+            metadata_parts.append(f"region: {obj.metadata['region_hint']}")
+        if obj.metadata.get("columns_estimate"):
+            metadata_parts.append(f"columns: {obj.metadata['columns_estimate']}")
+        metadata_line = " | ".join(metadata_parts)
         st.markdown(
             f"""
             <div class="mare-card" style="margin-bottom:0.8rem;">
               <div class="mare-label">{obj.object_type.value}</div>
               <div class="mare-value">{obj.object_id.split(':')[-1]}</div>
+              <p class="mare-mini" style="margin-top:0.4rem;"><strong>{metadata_line or 'no extra metadata yet'}</strong></p>
               <p class="mare-mini" style="margin-top:0.6rem;">{obj.content}</p>
             </div>
             """,
