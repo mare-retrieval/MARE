@@ -4,7 +4,7 @@ import math
 import re
 from collections import Counter
 
-from mare.highlight import render_highlighted_page
+from mare.highlight import render_highlighted_page, render_object_region_highlight
 from mare.retrievers.base import BaseRetriever
 from mare.types import DocumentObject, Modality, ObjectType, RetrievalHit
 
@@ -239,12 +239,14 @@ class TextRetriever(BaseRetriever):
             structure_bonus, bonus_reasons = _structure_bonus(set(query_tokens), document)
             score = (0.45 * cosine_score) + (0.2 * min(1.0, bm25_score / 8.0)) + structure_bonus + object_score
             snippet = best_object.content if best_object else _best_snippet(document.text, query)
+            hit_metadata = dict(document.metadata)
             if best_object:
                 reason_parts.append(
                     f"Best object: {best_object.object_type.value} ({', '.join(sorted(object_overlap)[:5])})"
                 )
                 if object_bonus_reasons:
                     reason_parts.append(f"Object boosts: {', '.join(object_bonus_reasons)}")
+                hit_metadata.update(best_object.metadata)
             if bonus_reasons:
                 reason_parts.append(f"Structure boosts: {', '.join(bonus_reasons)}")
             hits.append(
@@ -259,7 +261,7 @@ class TextRetriever(BaseRetriever):
                     page_image_path=document.page_image_path,
                     object_id=best_object.object_id if best_object else "",
                     object_type=best_object.object_type.value if best_object else "",
-                    metadata=document.metadata,
+                    metadata=hit_metadata,
                 )
             )
 
@@ -273,6 +275,13 @@ class TextRetriever(BaseRetriever):
                     page_image_path=hit.page_image_path,
                     query=query,
                     snippet=hit.snippet,
+                )
+            if not hit.highlight_image_path and hit.page_image_path and hit.object_type in {"table", "figure", "section"}:
+                hit.highlight_image_path = render_object_region_highlight(
+                    page_image_path=hit.page_image_path,
+                    page_number=hit.page,
+                    object_type=hit.object_type,
+                    metadata=hit.metadata,
                 )
 
         return top_hits

@@ -346,6 +346,10 @@ Expected Qdrant payload fields:
 - `text` or `snippet`
 - optional: `page_image_path`, `highlight_image_path`, `object_id`, `object_type`, `metadata`
 
+A complete advanced-stack example is available in:
+
+- `examples/advanced_stack.py`
+
 ## Packaging and release
 
 MARE is now structured as a regular Python package with:
@@ -375,6 +379,8 @@ The demo lets a user:
 - view the rendered page image
 - view the highlighted evidence image when available
 - inspect extracted objects on the best page
+
+For non-text objects such as tables and figures, MARE now falls back to region-level page highlighting when exact text-span highlighting is not available yet.
 
 The technical retrieval plan is hidden under a `Debug details` expander so the default experience stays user-facing.
 

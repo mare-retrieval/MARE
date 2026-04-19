@@ -107,3 +107,58 @@ def render_highlighted_page(
     highlighted = Image.alpha_composite(image, overlay).convert("RGB")
     highlighted.save(output_path)
     return str(output_path)
+
+
+def render_object_region_highlight(
+    page_image_path: str | Path,
+    page_number: int,
+    object_type: str,
+    metadata: dict[str, str] | None = None,
+) -> str:
+    Image, ImageDraw = _require_pillow()
+
+    page_image = Path(page_image_path)
+    if not page_image.exists():
+        return ""
+
+    metadata = metadata or {}
+    region_hint = (metadata.get("region_hint") or "middle").lower()
+    label = metadata.get("label", "")
+    key = hashlib.md5(f"{page_number}:{object_type}:{region_hint}:{label}".encode("utf-8")).hexdigest()[:12]
+    output_dir = page_image.parent / "highlights"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"page-{page_number}-object-{key}.png"
+    if output_path.exists():
+        return str(output_path)
+
+    image = Image.open(page_image).convert("RGBA")
+    width, height = image.size
+    overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    bands = {
+        "top": (0.12, 0.36),
+        "middle": (0.36, 0.68),
+        "bottom": (0.68, 0.9),
+        "unknown": (0.28, 0.72),
+    }
+    start_ratio, end_ratio = bands.get(region_hint, bands["unknown"])
+    y0 = int(height * start_ratio)
+    y1 = int(height * end_ratio)
+    x0 = int(width * 0.08)
+    x1 = int(width * 0.92)
+
+    fill = (80, 170, 255, 70)
+    outline = (20, 120, 220, 200)
+    if object_type == "table":
+        fill = (40, 180, 99, 70)
+        outline = (20, 120, 70, 210)
+    elif object_type == "figure":
+        fill = (168, 85, 247, 70)
+        outline = (126, 34, 206, 210)
+
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=14, fill=fill, outline=outline, width=4)
+
+    highlighted = Image.alpha_composite(image, overlay).convert("RGB")
+    highlighted.save(output_path)
+    return str(output_path)
