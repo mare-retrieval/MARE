@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mare-retrieval"
-version = "0.2.0"
+version = "0.3.0"
 description = "Evidence-first PDF retrieval library that returns the best page, exact snippet, and visual evidence for a query."
 readme = "README.md"
 requires-python = ">=3.9"

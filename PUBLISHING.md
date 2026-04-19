@@ -4,7 +4,7 @@ This repo is set up for both local package builds and GitHub Actions based PyPI 
 
 ## Before the first release
 
-1. Create a PyPI project named `mare`.
+1. Create or verify the PyPI project named `mare-retrieval`.
 2. In PyPI, configure trusted publishing for this GitHub repository.
 3. In GitHub, keep the `publish.yml` workflow enabled.
 4. Bump the version in:
@@ -60,4 +60,13 @@ Optional UI extras:
 
 ```bash
 pip install "mare-retrieval[ui]"
+```
+
+Optional integration extras:
+
+```bash
+pip install "mare-retrieval[docling]"
+pip install "mare-retrieval[unstructured]"
+pip install "mare-retrieval[fastembed]"
+pip install "mare-retrieval[integrations]"
 ```

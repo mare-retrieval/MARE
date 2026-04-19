@@ -1,10 +1,18 @@
+from pathlib import Path
+
 from setuptools import find_packages, setup
+
+README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 
 
 setup(
     name="mare-retrieval",
-    version="0.2.0",
+    version="0.3.0",
     description="Evidence-first PDF retrieval library that returns the best page, exact snippet, and visual evidence for a query.",
+    long_description=README,
+    long_description_content_type="text/markdown",
+    author="Saisandeep Kantareddy",
+    url="https://github.com/SaiSandeepKantareddy/MARE",
     package_dir={"": "src"},
     packages=find_packages("src"),
     python_requires=">=3.9",
