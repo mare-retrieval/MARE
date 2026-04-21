@@ -244,6 +244,7 @@ Built-in extension helpers:
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
 - `LangChain`, `LangGraph`, and `LlamaIndex` adapters for ecosystem-friendly retrieval
+- `PaddleOCRParser` and `SuryaParser` for OCR-first parsing on scanned or image-heavy PDFs
 - `FAISSIndexer` and `FAISSRetriever` for local vector retrieval without a running service
 - `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
 - `FastEmbedReranker` for open-source cross-encoder reranking
@@ -256,6 +257,8 @@ Recommended upgrade paths for developers:
 
 - `Docling` for richer local document parsing, layout, OCR, and table structure
 - `Unstructured` for document partitioning and element extraction
+- `PaddleOCR` for lightweight OCR-first extraction on scanned pages
+- `Surya` for OCR plus layout-aware document parsing on harder scanned documents
 - `FastEmbed` for local dense and sparse embeddings
 - `FAISS` for fast local vector search with minimal setup
 - `Qdrant` for hybrid dense/sparse/multivector retrieval and reranking pipelines
@@ -272,7 +275,9 @@ pip install "mare-retrieval[faiss]"
 pip install "mare-retrieval[langchain]"
 pip install "mare-retrieval[langgraph]"
 pip install "mare-retrieval[llamaindex]"
+pip install "mare-retrieval[paddleocr]"
 pip install "mare-retrieval[sentence-transformers]"
+pip install "mare-retrieval[surya]"
 pip install "mare-retrieval[unstructured]"
 pip install "mare-retrieval[fastembed]"
 pip install "mare-retrieval[integrations]"
@@ -285,6 +290,7 @@ On a small local machine, you can use MARE with the built-in parser and retrieve
 On a bigger machine or inside a production stack, you can upgrade pieces independently:
 
 - swap the parser for `Docling` or `Unstructured`
+- swap the parser for OCR-first stacks like `PaddleOCRParser` or `SuryaParser` when PDFs are scanned
 - swap the text retriever for an embedding-backed retriever such as `SentenceTransformersRetriever`
 - add a local vector backend like `FAISS` when you want a stronger local stack
 - add a cross-encoder reranker
@@ -413,6 +419,36 @@ best = app.best_match("how do I configure wake on lan")
 ```
 
 Docling is especially promising when you want stronger OCR, layout, and table/figure extraction while still keeping the MARE API unchanged.
+
+Example: use PaddleOCR for scanned PDFs where text extraction is weak.
+
+```python
+from mare import MAREApp, PaddleOCRParser
+
+app = MAREApp.from_pdf(
+    "scanned-manual.pdf",
+    parser=PaddleOCRParser(lang="en"),
+)
+
+best = app.best_match("what does this warning label say")
+```
+
+This is a good fit when the document is primarily scan-based and you want a lightweight OCR-first path.
+
+Example: use Surya for OCR plus layout-aware extraction on harder scanned documents.
+
+```python
+from mare import MAREApp, SuryaParser
+
+app = MAREApp.from_pdf(
+    "scanned-manual.pdf",
+    parser=SuryaParser(),
+)
+
+best = app.best_match("show me the table with configuration settings")
+```
+
+Surya is especially promising when you want OCR plus layout signals like section headers, figures, and tables from scanned or camera-captured pages.
 
 Example: keep MARE's app surface, but swap retrieval to Qdrant.
 

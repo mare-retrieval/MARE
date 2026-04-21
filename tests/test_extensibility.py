@@ -14,9 +14,11 @@ from mare import (
     IdentityReranker,
     KeywordBoostReranker,
     MAREApp,
+    PaddleOCRParser,
     QdrantHybridRetriever,
     QdrantIndexer,
     SentenceTransformersRetriever,
+    SuryaParser,
 )
 from mare.extensions import DoclingParser, MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
@@ -107,6 +109,8 @@ def test_custom_reranker_can_reorder_fused_results() -> None:
 def test_builtin_parsers_are_discoverable() -> None:
     assert get_parser("builtin") is not None
     assert get_parser("docling") is not None
+    assert get_parser("paddleocr") is not None
+    assert get_parser("surya") is not None
     assert get_parser("unstructured") is not None
 
 
@@ -238,6 +242,122 @@ def test_docling_parser_builds_mare_corpus_with_fake_module(tmp_path: Path, monk
     assert payload["documents"][0]["metadata"]["parser"] == "docling"
     assert payload["documents"][0]["metadata"]["confidence"] == "0.91"
     assert payload["documents"][1]["text"].startswith("Table 1")
+
+
+def test_paddleocr_parser_builds_mare_corpus_with_fake_module(tmp_path: Path, monkeypatch) -> None:
+    class _FakeOCRResult:
+        def __init__(self, texts, boxes, scores) -> None:
+            self.res = {
+                "rec_texts": texts,
+                "rec_boxes": boxes,
+                "rec_scores": scores,
+            }
+
+    class _FakePaddleOCR:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        def predict(self, image_path: str):
+            if image_path.endswith("page-1.png"):
+                return [_FakeOCRResult(["Wake on LAN feature", "Table 1 Settings"], [[0, 0, 10, 10], [0, 10, 10, 20]], [0.99, 0.95])]
+            return [_FakeOCRResult(["Connect the AC adapter"], [[0, 0, 12, 12]], [0.97])]
+
+    fake_paddleocr = types.ModuleType("paddleocr")
+    fake_paddleocr.PaddleOCR = _FakePaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", fake_paddleocr)
+    monkeypatch.setattr(
+        ingest_module,
+        "_render_page_images",
+        lambda pdf_path, image_dir, scale=1.5: [str(image_dir / "page-1.png"), str(image_dir / "page-2.png")],
+    )
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_text("placeholder")
+    output_path = tmp_path / "sample.json"
+
+    parser = PaddleOCRParser(lang="en")
+    parser.ingest(pdf_path, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert len(payload["documents"]) == 2
+    assert payload["documents"][0]["metadata"]["parser"] == "paddleocr"
+    assert "Wake on LAN feature" in payload["documents"][0]["text"]
+    assert len(payload["documents"][0]["objects"]) >= 2
+
+
+def test_surya_parser_builds_mare_corpus_with_fake_module(tmp_path: Path, monkeypatch) -> None:
+    class _FakeImage:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+    class _FakeImageModule:
+        @staticmethod
+        def open(path: str):
+            return _FakeImage(path)
+
+    class _FakeFoundationPredictor:
+        pass
+
+    class _FakeRecognitionPredictor:
+        def __init__(self, foundation_predictor) -> None:
+            self.foundation_predictor = foundation_predictor
+
+        def __call__(self, images, det_predictor=None):
+            image = images[0]
+            if image.path.endswith("page-1.png"):
+                return [{"text_lines": [{"text": "Wake on LAN feature", "bbox": [0, 0, 10, 10], "confidence": 0.98}]}]
+            return [{"text_lines": [{"text": "Connect the AC adapter", "bbox": [0, 0, 11, 11], "confidence": 0.97}]}]
+
+    class _FakeDetectionPredictor:
+        pass
+
+    class _FakeLayoutPredictor:
+        def __init__(self, foundation_predictor) -> None:
+            self.foundation_predictor = foundation_predictor
+
+        def __call__(self, images):
+            image = images[0]
+            if image.path.endswith("page-1.png"):
+                return [{"bboxes": [{"label": "Table", "bbox": [0, 20, 100, 60]}]}]
+            return [{"bboxes": [{"label": "Section-header", "bbox": [0, 0, 100, 20]}]}]
+
+    fake_pil = types.ModuleType("PIL")
+    fake_pil_image = types.ModuleType("PIL.Image")
+    fake_pil_image.open = _FakeImageModule.open
+    monkeypatch.setitem(sys.modules, "PIL", fake_pil)
+    monkeypatch.setitem(sys.modules, "PIL.Image", fake_pil_image)
+
+    fake_surya_foundation = types.ModuleType("surya.foundation")
+    fake_surya_foundation.FoundationPredictor = _FakeFoundationPredictor
+    fake_surya_recognition = types.ModuleType("surya.recognition")
+    fake_surya_recognition.RecognitionPredictor = _FakeRecognitionPredictor
+    fake_surya_detection = types.ModuleType("surya.detection")
+    fake_surya_detection.DetectionPredictor = _FakeDetectionPredictor
+    fake_surya_layout = types.ModuleType("surya.layout")
+    fake_surya_layout.LayoutPredictor = _FakeLayoutPredictor
+    monkeypatch.setitem(sys.modules, "surya", types.ModuleType("surya"))
+    monkeypatch.setitem(sys.modules, "surya.foundation", fake_surya_foundation)
+    monkeypatch.setitem(sys.modules, "surya.recognition", fake_surya_recognition)
+    monkeypatch.setitem(sys.modules, "surya.detection", fake_surya_detection)
+    monkeypatch.setitem(sys.modules, "surya.layout", fake_surya_layout)
+    monkeypatch.setattr(
+        ingest_module,
+        "_render_page_images",
+        lambda pdf_path, image_dir, scale=1.5: [str(image_dir / "page-1.png"), str(image_dir / "page-2.png")],
+    )
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_text("placeholder")
+    output_path = tmp_path / "sample.json"
+
+    parser = SuryaParser()
+    parser.ingest(pdf_path, output_path)
+    payload = json.loads(output_path.read_text())
+
+    assert len(payload["documents"]) == 2
+    assert payload["documents"][0]["metadata"]["parser"] == "surya"
+    assert "Wake on LAN feature" in payload["documents"][0]["text"]
+    assert any(obj["object_type"] == "table" for obj in payload["documents"][0]["objects"])
 
 
 def test_fastembed_reranker_uses_cross_encoder_scores(monkeypatch) -> None:

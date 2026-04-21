@@ -92,6 +92,376 @@ class BuiltinPDFParser:
         return output_path
 
 
+def _build_payload_document(
+    *,
+    pdf_path: Path,
+    title: str,
+    page_number: int,
+    text: str,
+    page_image_path: str,
+    objects: list[DocumentObject],
+    parser_name: str,
+    collection_name: str,
+    extra_metadata: dict[str, str] | None = None,
+) -> dict:
+    normalized_text = text.strip()
+    if normalized_text:
+        from mare.ingest import _infer_layout_hints, _infer_page_signals, _normalize_text
+
+        text_value = _normalize_text(normalized_text)
+        layout_hints = _infer_layout_hints(text_value)
+        signals = _infer_page_signals(text_value)
+    else:
+        text_value = f"[No extractable text found on page {page_number}]"
+        layout_hints = ""
+        signals = ""
+
+    metadata = {
+        "source": str(pdf_path),
+        "collection": collection_name,
+        "signals": signals,
+        "parser": parser_name,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+
+    return {
+        "doc_id": f"{pdf_path.stem.lower().replace(' ', '-')}-p{page_number}",
+        "title": title,
+        "page": page_number,
+        "text": text_value,
+        "image_caption": "",
+        "layout_hints": layout_hints,
+        "page_image_path": page_image_path,
+        "objects": [
+            {
+                "object_id": obj.object_id,
+                "doc_id": obj.doc_id,
+                "page": obj.page,
+                "object_type": obj.object_type.value,
+                "content": obj.content,
+                "metadata": obj.metadata,
+            }
+            for obj in objects
+        ],
+        "metadata": metadata,
+    }
+
+
+def _write_payload(output_path: Path, pdf_path: Path, payload_documents: list[dict]) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps({"source_pdf": str(pdf_path), "documents": payload_documents}, indent=2))
+    return output_path
+
+
+class PaddleOCRParser:
+    """OCR-first parser backed by PaddleOCR 3.x pipeline APIs."""
+
+    def __init__(self, lang: str | None = None, device: str | None = None) -> None:
+        self.lang = lang
+        self.device = device
+
+    def ingest(self, pdf_path: Path, output_path: Path) -> Path:
+        try:
+            from paddleocr import PaddleOCR
+        except ImportError as exc:
+            raise RuntimeError(
+                "PaddleOCRParser requires `paddleocr`. Install it with "
+                "`pip install 'mare-retrieval[paddleocr]'` or `pip install paddleocr`."
+            ) from exc
+
+        from mare.ingest import _render_page_images
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        page_images = _render_page_images(pdf_path, output_path.with_suffix(""))
+        title = pdf_path.stem
+        payload_documents: list[dict] = []
+
+        init_kwargs = {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+        }
+        if self.lang:
+            init_kwargs["lang"] = self.lang
+        if self.device:
+            init_kwargs["device"] = self.device
+
+        ocr = PaddleOCR(**init_kwargs)
+
+        for page_number, image_path in enumerate(page_images, start=1):
+            result = ocr.predict(image_path)
+            text, objects = self._extract_page_text_and_objects(
+                result=result,
+                doc_id=f"{pdf_path.stem.lower().replace(' ', '-')}-p{page_number}",
+                page_number=page_number,
+            )
+            payload_documents.append(
+                _build_payload_document(
+                    pdf_path=pdf_path,
+                    title=title,
+                    page_number=page_number,
+                    text=text,
+                    page_image_path=image_path,
+                    objects=objects,
+                    parser_name="paddleocr",
+                    collection_name="paddleocr-ingest",
+                )
+            )
+
+        return _write_payload(output_path, pdf_path, payload_documents)
+
+    @staticmethod
+    def _extract_page_text_and_objects(result, doc_id: str, page_number: int) -> tuple[str, list[DocumentObject]]:
+        page_items = list(result) if isinstance(result, (list, tuple)) else [result]
+        lines: list[str] = []
+        objects: list[DocumentObject] = []
+
+        for item in page_items:
+            text_lines = PaddleOCRParser._extract_text_lines(item)
+            for index, line in enumerate(text_lines, start=1):
+                normalized = str(line.get("text") or "").strip()
+                if not normalized:
+                    continue
+                lines.append(normalized)
+                metadata = {}
+                bbox = line.get("bbox")
+                confidence = line.get("confidence")
+                if bbox is not None:
+                    metadata["bbox"] = json.dumps(bbox)
+                if confidence is not None:
+                    metadata["confidence"] = str(confidence)
+                objects.append(
+                    DocumentObject(
+                        object_id=f"{doc_id}:ocr-line:{index}",
+                        doc_id=doc_id,
+                        page=page_number,
+                        object_type=ObjectType.SECTION,
+                        content=normalized,
+                        metadata=metadata,
+                    )
+                )
+
+        return "\n".join(lines), objects
+
+    @staticmethod
+    def _extract_text_lines(item) -> list[dict]:
+        if hasattr(item, "res"):
+            return PaddleOCRParser._extract_text_lines(getattr(item, "res"))
+        if hasattr(item, "json"):
+            try:
+                return PaddleOCRParser._extract_text_lines(item.json())
+            except TypeError:
+                pass
+        if isinstance(item, dict):
+            if "rec_texts" in item:
+                boxes = item.get("rec_boxes") or item.get("dt_polys") or []
+                scores = item.get("rec_scores") or []
+                lines = []
+                for index, text in enumerate(item.get("rec_texts") or []):
+                    lines.append(
+                        {
+                            "text": text,
+                            "bbox": boxes[index] if index < len(boxes) else None,
+                            "confidence": scores[index] if index < len(scores) else None,
+                        }
+                    )
+                return lines
+            if "texts" in item:
+                return [{"text": text} for text in item.get("texts") or []]
+            if "text" in item and isinstance(item.get("text"), str):
+                return [{"text": item["text"], "bbox": item.get("bbox"), "confidence": item.get("confidence")}]
+        if isinstance(item, list):
+            lines = []
+            for entry in item:
+                if isinstance(entry, dict):
+                    lines.extend(PaddleOCRParser._extract_text_lines(entry))
+                elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                    maybe_text = entry[1]
+                    if isinstance(maybe_text, (list, tuple)) and maybe_text:
+                        text = maybe_text[0]
+                        confidence = maybe_text[1] if len(maybe_text) > 1 else None
+                    else:
+                        text = maybe_text
+                        confidence = None
+                    lines.append({"text": text, "bbox": entry[0], "confidence": confidence})
+            return lines
+        return []
+
+
+class SuryaParser:
+    """OCR/layout parser backed by Surya's Python predictors."""
+
+    def ingest(self, pdf_path: Path, output_path: Path) -> Path:
+        try:
+            from PIL import Image
+            from surya.detection import DetectionPredictor
+            from surya.foundation import FoundationPredictor
+            from surya.layout import LayoutPredictor
+            from surya.recognition import RecognitionPredictor
+        except ImportError as exc:
+            raise RuntimeError(
+                "SuryaParser requires `surya-ocr` and Pillow. Install it with "
+                "`pip install 'mare-retrieval[surya]'` or `pip install surya-ocr pillow`."
+            ) from exc
+
+        from mare.ingest import _render_page_images
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        page_images = _render_page_images(pdf_path, output_path.with_suffix(""))
+        title = pdf_path.stem
+        payload_documents: list[dict] = []
+
+        foundation_predictor = FoundationPredictor()
+        recognition_predictor = RecognitionPredictor(foundation_predictor)
+        detection_predictor = DetectionPredictor()
+        layout_predictor = LayoutPredictor(foundation_predictor)
+
+        for page_number, image_path in enumerate(page_images, start=1):
+            image = Image.open(image_path)
+            recognition_predictions = recognition_predictor([image], det_predictor=detection_predictor)
+            layout_predictions = layout_predictor([image])
+            text, objects = self._extract_page_text_and_objects(
+                recognition_predictions=recognition_predictions,
+                layout_predictions=layout_predictions,
+                doc_id=f"{pdf_path.stem.lower().replace(' ', '-')}-p{page_number}",
+                page_number=page_number,
+            )
+            payload_documents.append(
+                _build_payload_document(
+                    pdf_path=pdf_path,
+                    title=title,
+                    page_number=page_number,
+                    text=text,
+                    page_image_path=image_path,
+                    objects=objects,
+                    parser_name="surya",
+                    collection_name="surya-ingest",
+                )
+            )
+
+        return _write_payload(output_path, pdf_path, payload_documents)
+
+    @staticmethod
+    def _extract_page_text_and_objects(recognition_predictions, layout_predictions, doc_id: str, page_number: int):
+        lines: list[str] = []
+        objects: list[DocumentObject] = []
+
+        for prediction in recognition_predictions or []:
+            for index, line in enumerate(SuryaParser._extract_text_lines(prediction), start=1):
+                text = str(line.get("text") or "").strip()
+                if not text:
+                    continue
+                lines.append(text)
+                metadata = {}
+                bbox = line.get("bbox")
+                confidence = line.get("confidence")
+                if bbox is not None:
+                    metadata["bbox"] = json.dumps(bbox)
+                if confidence is not None:
+                    metadata["confidence"] = str(confidence)
+                objects.append(
+                    DocumentObject(
+                        object_id=f"{doc_id}:ocr-line:{index}",
+                        doc_id=doc_id,
+                        page=page_number,
+                        object_type=ObjectType.SECTION,
+                        content=text,
+                        metadata=metadata,
+                    )
+                )
+
+        layout_index = len(objects)
+        for prediction in layout_predictions or []:
+            for entry in SuryaParser._extract_layout_entries(prediction):
+                label = str(entry.get("label") or "").strip()
+                bbox = entry.get("bbox")
+                object_type = SuryaParser._map_layout_label(label)
+                if object_type is None:
+                    continue
+                metadata = {"label": label}
+                if bbox is not None:
+                    metadata["region_hint"] = json.dumps(bbox)
+                    metadata["bbox"] = json.dumps(bbox)
+                top_k = entry.get("top_k")
+                if top_k:
+                    metadata["top_k"] = json.dumps(top_k)
+                layout_index += 1
+                objects.append(
+                    DocumentObject(
+                        object_id=f"{doc_id}:layout:{layout_index}",
+                        doc_id=doc_id,
+                        page=page_number,
+                        object_type=object_type,
+                        content=label or object_type.value,
+                        metadata=metadata,
+                    )
+                )
+
+        return "\n".join(lines), objects
+
+    @staticmethod
+    def _extract_text_lines(prediction) -> list[dict]:
+        if isinstance(prediction, dict):
+            if "text_lines" in prediction:
+                return list(prediction.get("text_lines") or [])
+            if "lines" in prediction:
+                return list(prediction.get("lines") or [])
+        text_lines = getattr(prediction, "text_lines", None)
+        if text_lines is not None:
+            return [SuryaParser._to_line_dict(line) for line in text_lines]
+        lines = getattr(prediction, "lines", None)
+        if lines is not None:
+            return [SuryaParser._to_line_dict(line) for line in lines]
+        return []
+
+    @staticmethod
+    def _to_line_dict(line) -> dict:
+        if isinstance(line, dict):
+            return line
+        return {
+            "text": getattr(line, "text", ""),
+            "bbox": getattr(line, "bbox", None),
+            "confidence": getattr(line, "confidence", None),
+        }
+
+    @staticmethod
+    def _extract_layout_entries(prediction) -> list[dict]:
+        if isinstance(prediction, dict):
+            if "bboxes" in prediction:
+                return list(prediction.get("bboxes") or [])
+            if "boxes" in prediction:
+                return list(prediction.get("boxes") or [])
+        bboxes = getattr(prediction, "bboxes", None)
+        if bboxes is not None:
+            return [SuryaParser._to_layout_dict(item) for item in bboxes]
+        boxes = getattr(prediction, "boxes", None)
+        if boxes is not None:
+            return [SuryaParser._to_layout_dict(item) for item in boxes]
+        return []
+
+    @staticmethod
+    def _to_layout_dict(item) -> dict:
+        if isinstance(item, dict):
+            return item
+        return {
+            "label": getattr(item, "label", None),
+            "bbox": getattr(item, "bbox", None),
+            "top_k": getattr(item, "top_k", None),
+        }
+
+    @staticmethod
+    def _map_layout_label(label: str) -> ObjectType | None:
+        normalized = label.lower()
+        if "table" in normalized or "form" in normalized:
+            return ObjectType.TABLE
+        if "figure" in normalized or "picture" in normalized or "caption" in normalized or "image" in normalized:
+            return ObjectType.FIGURE
+        if "section" in normalized or "header" in normalized or "text" in normalized:
+            return ObjectType.SECTION
+        return None
+
+
 class SentenceTransformersRetriever(BaseRetriever):
     """Semantic retriever backed by `sentence-transformers`."""
 
@@ -796,6 +1166,8 @@ class FAISSIndexer:
 _PARSER_REGISTRY: dict[str, DocumentParser] = {
     "builtin": BuiltinPDFParser(),
     "docling": DoclingParser(),
+    "paddleocr": PaddleOCRParser(),
+    "surya": SuryaParser(),
     "unstructured": UnstructuredParser(),
 }
 

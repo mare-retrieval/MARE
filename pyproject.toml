@@ -33,7 +33,9 @@ faiss = ["faiss-cpu>=1.8.0"]
 langchain = ["langchain-core>=0.3.0"]
 langgraph = ["langchain-core>=0.3.0", "langgraph>=0.3.0"]
 llamaindex = ["llama-index-core>=0.12.0"]
+paddleocr = ["paddleocr>=3.3.0"]
 sentence-transformers = ["sentence-transformers>=3.0.0"]
+surya = ["surya-ocr>=0.17.0", "pillow>=10.0.0"]
 fastembed = ["fastembed>=0.7.0"]
 unstructured = ["unstructured[pdf]>=0.16.0"]
 integrations = [
@@ -41,7 +43,10 @@ integrations = [
   "langchain-core>=0.3.0",
   "langgraph>=0.3.0",
   "llama-index-core>=0.12.0",
+  "paddleocr>=3.3.0",
   "sentence-transformers>=3.0.0",
+  "surya-ocr>=0.17.0",
+  "pillow>=10.0.0",
   "fastembed>=0.7.0",
   "qdrant-client[fastembed]>=1.14.1",
   "unstructured[pdf]>=0.16.0",
