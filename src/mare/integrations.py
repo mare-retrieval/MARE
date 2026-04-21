@@ -28,6 +28,28 @@ def _hit_text(hit: RetrievalHit) -> str:
     return hit.snippet or hit.reason or hit.title
 
 
+def hits_to_evidence_payload(query: str, hits: list[RetrievalHit]) -> dict[str, Any]:
+    return {
+        "query": query,
+        "results": [
+            {
+                "doc_id": hit.doc_id,
+                "title": hit.title,
+                "page": hit.page,
+                "score": hit.score,
+                "snippet": hit.snippet,
+                "reason": hit.reason,
+                "page_image_path": hit.page_image_path,
+                "highlight_image_path": hit.highlight_image_path,
+                "object_id": hit.object_id,
+                "object_type": hit.object_type,
+                "metadata": dict(hit.metadata),
+            }
+            for hit in hits
+        ],
+    }
+
+
 def hit_to_langchain_document(hit: RetrievalHit):
     try:
         from langchain_core.documents import Document as LangChainDocument
@@ -85,6 +107,31 @@ def create_langchain_retriever(app, top_k: int = 3):
             return self._get_relevant_documents(query, run_manager=run_manager)
 
     return LangChainMARERetriever(mare_app=app, top_k=top_k)
+
+
+def create_langgraph_tool(app, top_k: int = 3, name: str = "mare_retrieve", description: str | None = None):
+    try:
+        from langchain_core.tools import StructuredTool
+    except ImportError as exc:
+        raise RuntimeError(
+            "LangGraph tool integration requires `langchain-core`. Install it with "
+            "`pip install 'mare-retrieval[langgraph]'` or `pip install langchain-core langgraph`."
+        ) from exc
+
+    tool_description = description or (
+        "Retrieve evidence from documents with MARE. Returns structured page, snippet, "
+        "highlight, and metadata for the most relevant results."
+    )
+
+    def _run(query: str) -> dict[str, Any]:
+        hits = app.retrieve(query=query, top_k=top_k)
+        return hits_to_evidence_payload(query, hits)
+
+    return StructuredTool.from_function(
+        func=_run,
+        name=name,
+        description=tool_description,
+    )
 
 
 def create_llamaindex_retriever(app, top_k: int = 3):

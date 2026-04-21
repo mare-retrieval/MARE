@@ -243,7 +243,7 @@ Built-in extension helpers:
 
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
-- `LangChain` and `LlamaIndex` adapters for ecosystem-friendly retrieval
+- `LangChain`, `LangGraph`, and `LlamaIndex` adapters for ecosystem-friendly retrieval
 - `FAISSIndexer` and `FAISSRetriever` for local vector retrieval without a running service
 - `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
 - `FastEmbedReranker` for open-source cross-encoder reranking
@@ -270,6 +270,7 @@ Install optional integrations when you need them:
 pip install "mare-retrieval[docling]"
 pip install "mare-retrieval[faiss]"
 pip install "mare-retrieval[langchain]"
+pip install "mare-retrieval[langgraph]"
 pip install "mare-retrieval[llamaindex]"
 pip install "mare-retrieval[sentence-transformers]"
 pip install "mare-retrieval[unstructured]"
@@ -371,6 +372,19 @@ docs = retriever.invoke("how do I configure wake on lan")
 
 Each returned LangChain document includes the usual page content plus MARE metadata like `page`, `score`, `object_type`, `page_image_path`, and `highlight_image_path`.
 
+Example: use MARE as a LangGraph-ready evidence tool.
+
+```python
+from mare import MAREApp
+
+app = MAREApp.from_corpus("generated/manual.json")
+tool = app.as_langgraph_tool(top_k=3)
+
+result = tool.invoke({"query": "how do I configure wake on lan"})
+```
+
+The tool returns structured evidence with page, snippet, highlight path, and metadata, which fits naturally into agent/tool workflows where the LLM needs grounded retrieval output instead of a plain text blob.
+
 Example: plug MARE into LlamaIndex as a retriever.
 
 ```python
@@ -456,6 +470,7 @@ It supports combinations like:
 - Qdrant indexing plus Qdrant-backed retrieval
 - FastEmbed reranking
 - LangChain document output
+- LangGraph-ready tool output
 - LlamaIndex node output
 
 Example:

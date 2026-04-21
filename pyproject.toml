@@ -31,6 +31,7 @@ ui = ["streamlit>=1.12,<2.0", "altair<5"]
 docling = ["docling>=2.70.0; python_version >= '3.10'"]
 faiss = ["faiss-cpu>=1.8.0"]
 langchain = ["langchain-core>=0.3.0"]
+langgraph = ["langchain-core>=0.3.0", "langgraph>=0.3.0"]
 llamaindex = ["llama-index-core>=0.12.0"]
 sentence-transformers = ["sentence-transformers>=3.0.0"]
 fastembed = ["fastembed>=0.7.0"]
@@ -38,6 +39,7 @@ unstructured = ["unstructured[pdf]>=0.16.0"]
 integrations = [
   "faiss-cpu>=1.8.0",
   "langchain-core>=0.3.0",
+  "langgraph>=0.3.0",
   "llama-index-core>=0.12.0",
   "sentence-transformers>=3.0.0",
   "fastembed>=0.7.0",

@@ -5,8 +5,10 @@ import types
 
 from mare import MAREApp
 from mare.integrations import (
+    create_langgraph_tool,
     create_langchain_retriever,
     create_llamaindex_retriever,
+    hits_to_evidence_payload,
     hit_to_langchain_document,
     hit_to_llamaindex_node,
 )
@@ -46,6 +48,15 @@ def test_hit_to_langchain_document_maps_metadata(monkeypatch) -> None:
     assert document.page_content.startswith("Wake on LAN")
     assert document.metadata["doc_id"] == "doc-61"
     assert document.metadata["object_type"] == "procedure"
+
+
+def test_hits_to_evidence_payload_preserves_result_fields() -> None:
+    payload = hits_to_evidence_payload("wake on lan", [_sample_hit()])
+
+    assert payload["query"] == "wake on lan"
+    assert len(payload["results"]) == 1
+    assert payload["results"][0]["doc_id"] == "doc-61"
+    assert payload["results"][0]["object_type"] == "procedure"
 
 
 def test_hit_to_llamaindex_node_maps_metadata(monkeypatch) -> None:
@@ -105,6 +116,69 @@ def test_mare_app_exposes_langchain_retriever(monkeypatch) -> None:
     assert len(results) == 1
     assert results[0].metadata["page"] == 1
     assert "adapter" in results[0].page_content.lower()
+
+
+def test_create_langgraph_tool_returns_structured_evidence(monkeypatch) -> None:
+    class _FakeStructuredTool:
+        def __init__(self, func, name: str, description: str) -> None:
+            self.func = func
+            self.name = name
+            self.description = description
+
+        def invoke(self, payload):
+            if isinstance(payload, dict):
+                return self.func(**payload)
+            return self.func(payload)
+
+        @classmethod
+        def from_function(cls, func, name: str, description: str):
+            return cls(func=func, name=name, description=description)
+
+    fake_tools = types.ModuleType("langchain_core.tools")
+    fake_tools.StructuredTool = _FakeStructuredTool
+    monkeypatch.setitem(sys.modules, "langchain_core", types.ModuleType("langchain_core"))
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools)
+
+    app = MAREApp.from_documents(
+        [Document(doc_id="9", title="Manual", page=4, text="Connect the AC adapter to the computer.")]
+    )
+
+    tool = create_langgraph_tool(app, top_k=1)
+    result = tool.invoke({"query": "connect the AC adapter"})
+
+    assert tool.name == "mare_retrieve"
+    assert result["query"] == "connect the AC adapter"
+    assert len(result["results"]) == 1
+    assert result["results"][0]["page"] == 4
+
+
+def test_mare_app_exposes_langgraph_tool(monkeypatch) -> None:
+    class _FakeStructuredTool:
+        def __init__(self, func, name: str, description: str) -> None:
+            self.func = func
+            self.name = name
+            self.description = description
+
+        def invoke(self, payload):
+            if isinstance(payload, dict):
+                return self.func(**payload)
+            return self.func(payload)
+
+        @classmethod
+        def from_function(cls, func, name: str, description: str):
+            return cls(func=func, name=name, description=description)
+
+    fake_tools = types.ModuleType("langchain_core.tools")
+    fake_tools.StructuredTool = _FakeStructuredTool
+    monkeypatch.setitem(sys.modules, "langchain_core", types.ModuleType("langchain_core"))
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools)
+
+    app = MAREApp.from_documents([Document(doc_id="5", title="Manual", page=8, text="Wake on LAN feature setup.")])
+    tool = app.as_langgraph_tool(top_k=1, name="custom_mare_tool")
+    result = tool.invoke({"query": "wake on lan"})
+
+    assert tool.name == "custom_mare_tool"
+    assert result["results"][0]["doc_id"] == "5"
 
 
 def test_create_langchain_retriever_factory_works(monkeypatch) -> None:

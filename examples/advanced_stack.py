@@ -11,6 +11,7 @@ how to keep MARE's evidence-first application surface while swapping in:
 - Qdrant indexing + retrieval
 - FastEmbed reranking
 - LangChain / LlamaIndex adapter output
+- LangGraph-ready tool output
 
 Typical usage:
 
@@ -36,6 +37,12 @@ Typical usage:
      --corpus generated/manual.json \
      --query "how do I connect the AC adapter" \
      --langchain
+
+4. Return a LangGraph-ready evidence tool payload
+   PYTHONPATH=src python3 examples/advanced_stack.py \
+     --corpus generated/manual.json \
+     --query "how do I connect the AC adapter" \
+     --langgraph
 """
 
 import argparse
@@ -133,6 +140,17 @@ def _langchain_payload(app: MAREApp, query: str, top_k: int) -> dict:
     }
 
 
+def _langgraph_payload(app: MAREApp, query: str, top_k: int) -> dict:
+    tool = app.as_langgraph_tool(top_k=top_k)
+    result = tool.invoke({"query": query})
+    return {
+        "framework": "langgraph",
+        "query": query,
+        "tool_name": getattr(tool, "name", "mare_retrieve"),
+        "result": result,
+    }
+
+
 def _llamaindex_payload(app: MAREApp, query: str, top_k: int) -> dict:
     try:
         from llama_index.core.schema import QueryBundle
@@ -206,6 +224,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recreate-qdrant", action="store_true", help="Recreate the Qdrant collection when indexing")
     parser.add_argument("--use-qdrant", action="store_true", help="Use Qdrant for text retrieval")
     parser.add_argument("--langchain", action="store_true", help="Return LangChain documents instead of raw MARE hits")
+    parser.add_argument("--langgraph", action="store_true", help="Return a LangGraph-ready tool result")
     parser.add_argument(
         "--llamaindex",
         action="store_true",
@@ -220,11 +239,14 @@ def main() -> None:
     app = _load_app(args)
     indexed_count = _maybe_index_qdrant(app, args)
 
-    if args.langchain and args.llamaindex:
-        raise SystemExit("Choose either --langchain or --llamaindex, not both.")
+    selected_frameworks = sum([bool(args.langchain), bool(args.langgraph), bool(args.llamaindex)])
+    if selected_frameworks > 1:
+        raise SystemExit("Choose at most one of --langchain, --langgraph, or --llamaindex.")
 
     if args.langchain:
         payload = _langchain_payload(app, args.query, args.top_k)
+    elif args.langgraph:
+        payload = _langgraph_payload(app, args.query, args.top_k)
     elif args.llamaindex:
         payload = _llamaindex_payload(app, args.query, args.top_k)
     else:

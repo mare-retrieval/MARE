@@ -20,8 +20,10 @@ from .extensions import (
 )
 from .fusion import WeightedScoreFusion
 from .integrations import (
+    create_langgraph_tool,
     create_langchain_retriever,
     create_llamaindex_retriever,
+    hits_to_evidence_payload,
     hit_to_langchain_document,
     hit_to_llamaindex_node,
 )
@@ -30,6 +32,7 @@ from .types import Document, Modality, QueryPlan, RetrievalExplanation, Retrieva
 
 __all__ = [
     "BuiltinPDFParser",
+    "create_langgraph_tool",
     "create_langchain_retriever",
     "create_llamaindex_retriever",
     "Document",
@@ -38,6 +41,7 @@ __all__ = [
     "FAISSRetriever",
     "FastEmbedReranker",
     "HeuristicModalityRouter",
+    "hits_to_evidence_payload",
     "hit_to_langchain_document",
     "hit_to_llamaindex_node",
     "IdentityReranker",

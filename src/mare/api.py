@@ -81,6 +81,11 @@ class MAREApp:
 
         return create_langchain_retriever(self, top_k=top_k)
 
+    def as_langgraph_tool(self, top_k: int = 3, name: str = "mare_retrieve", description: str | None = None):
+        from mare.integrations import create_langgraph_tool
+
+        return create_langgraph_tool(self, top_k=top_k, name=name, description=description)
+
     def as_llamaindex_retriever(self, top_k: int = 3):
         from mare.integrations import create_llamaindex_retriever
 
