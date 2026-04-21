@@ -4,6 +4,94 @@ import tempfile
 from pathlib import Path
 
 
+PARSER_OPTIONS = {
+    "Builtin PDF": {
+        "value": "builtin",
+        "description": "Fast default parser for normal PDFs with extractable text.",
+        "extra": "core",
+    },
+    "Docling": {
+        "value": "docling",
+        "description": "Richer OCR/layout/table extraction for stronger document structure.",
+        "extra": "mare-retrieval[docling]",
+    },
+    "Unstructured": {
+        "value": "unstructured",
+        "description": "Element-level parsing for chunk and object extraction.",
+        "extra": "mare-retrieval[unstructured]",
+    },
+    "PaddleOCR": {
+        "value": "paddleocr",
+        "description": "OCR-first path for scanned PDFs and image-heavy pages.",
+        "extra": "mare-retrieval[paddleocr]",
+    },
+    "Surya": {
+        "value": "surya",
+        "description": "OCR plus layout-aware parsing for harder scanned documents.",
+        "extra": "mare-retrieval[surya]",
+    },
+}
+
+RETRIEVER_OPTIONS = {
+    "Built-in lexical": {
+        "value": "builtin",
+        "description": "Uses MARE's default page and object-aware retrieval stack.",
+        "extra": "core",
+    },
+    "Sentence Transformers": {
+        "value": "sentence-transformers",
+        "description": "Drop-in semantic retrieval with Hugging Face models.",
+        "extra": "mare-retrieval[sentence-transformers]",
+    },
+    "FAISS local vector": {
+        "value": "faiss",
+        "description": "Stronger local vector search without running an external service.",
+        "extra": "mare-retrieval[faiss]",
+    },
+    "Qdrant service": {
+        "value": "qdrant",
+        "description": "Production-style vector backend with optional indexing into a running Qdrant instance.",
+        "extra": "mare-retrieval[integrations]",
+    },
+}
+
+RERANKER_OPTIONS = {
+    "None": {
+        "value": "none",
+        "description": "Return fused retrieval results directly.",
+        "extra": "core",
+    },
+    "FastEmbed": {
+        "value": "fastembed",
+        "description": "Open-source cross-encoder reranking for better top-result quality.",
+        "extra": "mare-retrieval[fastembed]",
+    },
+}
+
+OUTPUT_OPTIONS = {
+    "MARE evidence": {
+        "value": "mare",
+        "description": "Default page/snippet/highlight evidence view.",
+        "extra": "core",
+    },
+    "LangChain preview": {
+        "value": "langchain",
+        "description": "Preview the result shape as LangChain documents.",
+        "extra": "mare-retrieval[langchain]",
+    },
+    "LangGraph tool": {
+        "value": "langgraph",
+        "description": "Preview the structured evidence payload an agent tool would receive.",
+        "extra": "mare-retrieval[langgraph]",
+    },
+    "LlamaIndex preview": {
+        "value": "llamaindex",
+        "description": "Preview the result shape as LlamaIndex nodes.",
+        "extra": "mare-retrieval[llamaindex]",
+    },
+}
+
+
 def _require_streamlit():
     try:
         import streamlit as st
@@ -70,6 +158,17 @@ def _inject_styles(st) -> None:
         .mare-mini {
             font-size: 0.9rem;
             color: #475569;
+        }
+        .mare-badge {
+            display: inline-block;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #3730a3;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 0.4rem;
+            margin-top: 0.25rem;
         }
         </style>
         """,
@@ -150,9 +249,120 @@ def _render_page_objects(st, objects) -> None:
         )
 
 
-def _run_query(st, uploaded_pdf, query: str, top_k: int):
-    from mare import load_pdf
+def _option_labels(options: dict[str, dict]) -> list[str]:
+    return list(options.keys())
 
+
+def _selected_option_payload(options: dict[str, dict], label: str) -> dict:
+    return options[label]
+
+
+def _render_stack_summary(st, stack: dict) -> None:
+    st.markdown(
+        f"""
+        <div class="mare-card">
+          <div class="mare-label">Stack Used</div>
+          <div style="margin-top:0.25rem;">
+            <span class="mare-badge">Parser: {stack['parser']}</span>
+            <span class="mare-badge">Retriever: {stack['retriever']}</span>
+            <span class="mare-badge">Reranker: {stack['reranker']}</span>
+            <span class="mare-badge">Output: {stack['output_mode']}</span>
+          </div>
+          <p class="mare-mini" style="margin-top:0.85rem;">{stack['summary']}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
+    from mare import (
+        FAISSRetriever,
+        FastEmbedReranker,
+        MAREConfig,
+        Modality,
+        QdrantHybridRetriever,
+        QdrantIndexer,
+        SentenceTransformersRetriever,
+        load_pdf,
+    )
+
+    retriever_factories = {}
+    reranker = None
+
+    if retriever_key == "sentence-transformers":
+        retriever_factories[Modality.TEXT] = lambda documents: SentenceTransformersRetriever(documents)
+    elif retriever_key == "faiss":
+        retriever_factories[Modality.TEXT] = lambda documents: FAISSRetriever(documents)
+    elif retriever_key == "qdrant":
+        retriever_factories[Modality.TEXT] = lambda documents: QdrantHybridRetriever(
+            documents,
+            collection_name=qdrant_collection,
+            url=qdrant_url,
+            vector_name="text",
+        )
+
+    if reranker_key == "fastembed":
+        reranker = FastEmbedReranker()
+
+    config = MAREConfig(retriever_factories=retriever_factories, reranker=reranker)
+
+    def _loader(pdf_path: Path, reuse: bool):
+        return load_pdf(pdf_path=pdf_path, reuse=reuse, parser=parser_key, config=config)
+
+    def _maybe_index(app):
+        if retriever_key != "qdrant" or not qdrant_index_before_query:
+            return None
+        indexer = QdrantIndexer(
+            collection_name=qdrant_collection,
+            url=qdrant_url,
+            vector_name="text",
+        )
+        indexed = indexer.index_documents(app.documents, recreate=True)
+        return {"backend": "qdrant", "indexed_documents": indexed, "collection": qdrant_collection}
+
+    return _loader, _maybe_index
+
+
+def _build_output_preview(app, query: str, top_k: int, output_mode: str):
+    if output_mode == "mare":
+        return None
+    if output_mode == "langchain":
+        retriever = app.as_langchain_retriever(top_k=top_k)
+        return {
+            "framework": "langchain",
+            "results": [
+                {"page_content": doc.page_content, "metadata": doc.metadata}
+                for doc in retriever.invoke(query)
+            ],
+        }
+    if output_mode == "langgraph":
+        tool = app.as_langgraph_tool(top_k=top_k)
+        return {
+            "framework": "langgraph",
+            "tool_name": getattr(tool, "name", "mare_retrieve"),
+            "result": tool.invoke({"query": query}),
+        }
+    if output_mode == "llamaindex":
+        from llama_index.core.schema import QueryBundle
+
+        retriever = app.as_llamaindex_retriever(top_k=top_k)
+        nodes = retriever.retrieve(QueryBundle(query))
+        return {
+            "framework": "llamaindex",
+            "results": [
+                {
+                    "score": node.score,
+                    "text": getattr(node.node, "text", ""),
+                    "metadata": getattr(node.node, "metadata", {}),
+                }
+                for node in nodes
+            ],
+        }
+    return None
+
+
+def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
     if not query.strip():
         st.warning("Enter a question first.")
         return
@@ -162,10 +372,43 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int):
     pdf_path = temp_dir / uploaded_pdf.name
     pdf_path.write_bytes(uploaded_pdf.getvalue())
 
-    with st.spinner("Ingesting PDF and retrieving best pages..."):
-        app = load_pdf(pdf_path=pdf_path, reuse=False)
-        corpus_path = app.corpus_path
-        explanation = app.explain(query=query, top_k=top_k)
+    parser_key = stack_controls["parser"]["value"]
+    retriever_key = stack_controls["retriever"]["value"]
+    reranker_key = stack_controls["reranker"]["value"]
+    output_mode = stack_controls["output"]["value"]
+
+    loader, maybe_index = _build_runtime(
+        parser_key=parser_key,
+        retriever_key=retriever_key,
+        reranker_key=reranker_key,
+        qdrant_url=stack_controls["qdrant_url"],
+        qdrant_collection=stack_controls["qdrant_collection"],
+        qdrant_index_before_query=stack_controls["qdrant_index_before_query"],
+    )
+
+    try:
+        with st.spinner("Ingesting PDF and retrieving best pages..."):
+            app = loader(pdf_path=pdf_path, reuse=stack_controls["reuse_corpus"])
+            indexing_summary = maybe_index(app)
+            corpus_path = app.corpus_path
+            explanation = app.explain(query=query, top_k=top_k)
+            output_preview = _build_output_preview(app, query=query, top_k=top_k, output_mode=output_mode)
+    except Exception as exc:  # noqa: BLE001
+        st.error(str(exc))
+        return
+
+    stack_summary = {
+        "parser": next(label for label, meta in PARSER_OPTIONS.items() if meta["value"] == parser_key),
+        "retriever": next(label for label, meta in RETRIEVER_OPTIONS.items() if meta["value"] == retriever_key),
+        "reranker": next(label for label, meta in RERANKER_OPTIONS.items() if meta["value"] == reranker_key),
+        "output_mode": next(label for label, meta in OUTPUT_OPTIONS.items() if meta["value"] == output_mode),
+        "summary": (
+            f"This run used the {next(label for label, meta in PARSER_OPTIONS.items() if meta['value'] == parser_key)} parser, "
+            f"{next(label for label, meta in RETRIEVER_OPTIONS.items() if meta['value'] == retriever_key)} retrieval, "
+            f"and {next(label for label, meta in RERANKER_OPTIONS.items() if meta['value'] == reranker_key)} reranking."
+        ),
+        "indexing": indexing_summary,
+    }
 
     st.session_state["mare_result"] = {
         "query": query,
@@ -173,6 +416,8 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int):
         "explanation": explanation,
         "filename": uploaded_pdf.name,
         "app": app,
+        "stack": stack_summary,
+        "output_preview": output_preview,
     }
 
 
@@ -192,9 +437,9 @@ def main() -> None:
     st.markdown(
         """
         <div class="mare-hero">
-          <h1 style="margin:0 0 0.35rem 0;">MARE</h1>
+          <h1 style="margin:0 0 0.35rem 0;">MARE Playground</h1>
           <p style="margin:0; font-size:1.05rem; color:#334155;">
-            Ask a document a question and inspect the exact page, snippet, and visual evidence.
+            Ask a document a question, inspect the exact evidence, and see which parser, retriever, reranker, and framework output shape powered the run.
           </p>
         </div>
         """,
@@ -202,14 +447,75 @@ def main() -> None:
     )
 
     with st.sidebar:
-        st.header("How To Test")
+        st.header("MARE Playground")
+        mode = st.radio(
+            "Mode",
+            ["Basic", "Advanced"],
+            index=0,
+            help="Basic keeps the UI simple. Advanced exposes parser, retriever, reranker, and framework output choices.",
+        )
+
+        st.markdown("**How To Test**")
         st.write("1. Upload a PDF")
         st.write("2. Ask a concrete instruction question")
-        st.write("3. Inspect the highlighted evidence")
+        st.write("3. Inspect the highlighted evidence and stack used")
         st.markdown("**Good test prompts**")
         st.code("partially reinstall the set screws if they fall out", language="text")
-        st.code("what does MagSafe 3 refer to", language="text")
+        st.code("how do I connect the AC adapter", language="text")
         st.code("show me the comparison table", language="text")
+
+        if mode == "Advanced":
+            st.markdown("---")
+            st.subheader("Stack Controls")
+            parser_label = st.selectbox("Parser", _option_labels(PARSER_OPTIONS), index=0)
+            parser_meta = _selected_option_payload(PARSER_OPTIONS, parser_label)
+            st.caption(f"{parser_meta['description']} Install: `{parser_meta['extra']}`")
+
+            retriever_label = st.selectbox("Retriever", _option_labels(RETRIEVER_OPTIONS), index=0)
+            retriever_meta = _selected_option_payload(RETRIEVER_OPTIONS, retriever_label)
+            st.caption(f"{retriever_meta['description']} Install: `{retriever_meta['extra']}`")
+
+            reranker_label = st.selectbox("Reranker", _option_labels(RERANKER_OPTIONS), index=0)
+            reranker_meta = _selected_option_payload(RERANKER_OPTIONS, reranker_label)
+            st.caption(f"{reranker_meta['description']} Install: `{reranker_meta['extra']}`")
+
+            output_label = st.selectbox("Output Preview", _option_labels(OUTPUT_OPTIONS), index=0)
+            output_meta = _selected_option_payload(OUTPUT_OPTIONS, output_label)
+            st.caption(f"{output_meta['description']} Install: `{output_meta['extra']}`")
+
+            reuse_corpus = st.checkbox("Reuse ingested corpus if available", value=False)
+
+            qdrant_url = "http://localhost:6333"
+            qdrant_collection = "mare-docs"
+            qdrant_index_before_query = False
+            if retriever_meta["value"] == "qdrant":
+                qdrant_url = st.text_input("Qdrant URL", value="http://localhost:6333")
+                qdrant_collection = st.text_input("Qdrant collection", value="mare-docs")
+                qdrant_index_before_query = st.checkbox("Index current PDF into Qdrant before retrieval", value=False)
+        else:
+            parser_label = "Builtin PDF"
+            retriever_label = "Built-in lexical"
+            reranker_label = "None"
+            output_label = "MARE evidence"
+            reuse_corpus = False
+            qdrant_url = "http://localhost:6333"
+            qdrant_collection = "mare-docs"
+            qdrant_index_before_query = False
+
+        stack_controls = {
+            "parser": _selected_option_payload(PARSER_OPTIONS, parser_label),
+            "retriever": _selected_option_payload(RETRIEVER_OPTIONS, retriever_label),
+            "reranker": _selected_option_payload(RERANKER_OPTIONS, reranker_label),
+            "output": _selected_option_payload(OUTPUT_OPTIONS, output_label),
+            "reuse_corpus": reuse_corpus,
+            "qdrant_url": qdrant_url,
+            "qdrant_collection": qdrant_collection,
+            "qdrant_index_before_query": qdrant_index_before_query,
+            "mode": mode,
+        }
+
+        st.markdown("---")
+        st.caption("The Streamlit app is for visual exploration. The Python package gives you deeper control over custom stacks, automation, and benchmarks.")
 
     uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
     query = st.text_input(
@@ -223,12 +529,12 @@ def main() -> None:
     submitted = st.button("Ask MARE")
 
     if uploaded_pdf is None:
-        st.info("Upload a PDF to start. The demo will render pages, retrieve evidence, and show the best page visually.")
+        st.info("Upload a PDF to start. The demo will render pages, retrieve evidence, and show the stack used for the run.")
         return
 
     if submitted or st.session_state.get("mare_submit_via_enter"):
         st.session_state["mare_submit_via_enter"] = False
-        _run_query(st, uploaded_pdf, query, top_k)
+        _run_query(st, uploaded_pdf, query, top_k, stack_controls)
 
     result = st.session_state.get("mare_result")
     if not result:
@@ -238,7 +544,7 @@ def main() -> None:
               <div class="mare-label">Uploaded file</div>
               <div class="mare-value">{uploaded_pdf.name}</div>
               <p class="mare-mini" style="margin-top:0.8rem;">
-                Ask a question to see the best matching page, the exact snippet, and a highlighted evidence image.
+                Ask a question to see the best matching page, the exact snippet, the highlighted evidence image, and the stack used for that run.
               </p>
             </div>
             """,
@@ -316,19 +622,7 @@ def main() -> None:
     with preview_left:
         _render_object_preview(st, explanation)
     with preview_right:
-        st.markdown(
-            """
-            <div class="mare-card">
-              <div class="mare-label">What MARE Is Doing</div>
-              <p class="mare-mini">
-                MARE now retrieves evidence at the object level when possible. Instead of only searching whole pages,
-                it can match procedure-like blocks, figure mentions, table mentions, and section chunks, then map the
-                winning object back to the page image.
-              </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        _render_stack_summary(st, result["stack"])
 
     st.markdown("")
     _render_page_objects(st, app.get_page_objects(best.doc_id, limit=6) if app else [])
@@ -341,6 +635,11 @@ def main() -> None:
             with col:
                 _render_candidate(st, hit, idx)
 
+    output_preview = result.get("output_preview")
+    if output_preview:
+        with st.expander("Framework Output Preview"):
+            st.json(output_preview)
+
     with st.expander("Debug details"):
         st.write(
             {
@@ -350,6 +649,7 @@ def main() -> None:
                 "confidence": explanation.plan.confidence,
                 "rationale": explanation.plan.rationale,
                 "corpus": result["corpus_path"],
+                "stack": result["stack"],
             }
         )
 
