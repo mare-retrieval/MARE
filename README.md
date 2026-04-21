@@ -28,6 +28,7 @@ Paper inspiration: https://arxiv.org/pdf/2602.17687
 - Extracts document objects such as procedures, sections, figures, and tables
 - Supports object-aware retrieval, with the strongest behavior today on procedures and sections
 - Exposes a Python API, CLI tools, and a Streamlit demo
+- Includes an evaluation harness for page/object/no-result benchmarking
 
 ## What is still early or experimental
 
@@ -643,6 +644,52 @@ The debug surface is a core feature, not an afterthought. For retrieval systems 
 - When should the system return no result?
 
 That is the wedge for MARE: make retrieval inspectable before trying to make it magical.
+
+## Evaluation Harness
+
+MARE now includes a lightweight evaluation harness so we can measure retrieval quality instead of guessing.
+
+It supports:
+
+- page hit rate
+- document hit rate
+- object hit rate
+- no-result correctness
+
+Run it with:
+
+```bash
+mare-eval --corpus examples/sample_corpus.json --eval examples/eval_cases.json
+```
+
+Or from source:
+
+```bash
+PYTHONPATH=src python3 -m mare.eval --corpus examples/sample_corpus.json --eval examples/eval_cases.json
+```
+
+The evaluation file is simple JSON:
+
+```json
+{
+  "cases": [
+    {
+      "query": "show me the architecture diagram",
+      "expected_doc_id": "paper-hyde-p3",
+      "expected_page": 3,
+      "expected_object_type": "figure",
+      "top_k": 3
+    },
+    {
+      "query": "show me a nonexistent appendix table",
+      "expect_no_result": true,
+      "top_k": 3
+    }
+  ]
+}
+```
+
+This is useful both for library developers and for teams evaluating their own parser/retriever/reranker combinations on top of MARE.
 
 ## Local sample data
 

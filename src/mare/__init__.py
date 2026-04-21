@@ -2,6 +2,7 @@
 
 from .api import MAREApp, load_corpus, load_pdf
 from .engine import MAREngine
+from .eval import EvalCase, EvalCaseResult, EvalSummary, evaluate_cases, evaluate_corpus, load_eval_cases
 from .extensions import (
     BuiltinPDFParser,
     DoclingParser,
@@ -39,6 +40,9 @@ __all__ = [
     "create_llamaindex_retriever",
     "Document",
     "DoclingParser",
+    "EvalCase",
+    "EvalCaseResult",
+    "EvalSummary",
     "FAISSIndexer",
     "FAISSRetriever",
     "FastEmbedReranker",
@@ -49,7 +53,10 @@ __all__ = [
     "IdentityReranker",
     "KeywordBoostReranker",
     "get_parser",
+    "evaluate_cases",
+    "evaluate_corpus",
     "load_corpus",
+    "load_eval_cases",
     "load_pdf",
     "MAREConfig",
     "MAREApp",

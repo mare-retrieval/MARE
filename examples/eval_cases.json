@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "query": "what is positional encoding",
+      "expected_doc_id": "paper-hyde-p3",
+      "expected_page": 3,
+      "top_k": 3
+    },
+    {
+      "query": "show me the architecture diagram",
+      "expected_doc_id": "paper-hyde-p3",
+      "expected_page": 3,
+      "expected_object_type": "figure",
+      "top_k": 3
+    },
+    {
+      "query": "table comparing retrieval models",
+      "expected_doc_id": "paper-benchmark-p7",
+      "expected_page": 7,
+      "expected_object_type": "table",
+      "top_k": 3
+    },
+    {
+      "query": "show me the comparison table",
+      "expected_doc_id": "paper-benchmark-p7",
+      "expected_page": 7,
+      "expected_object_type": "table",
+      "top_k": 3
+    }
+  ]
+}

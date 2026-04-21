@@ -55,6 +55,7 @@ integrations = [
 
 [project.scripts]
 mare-demo = "mare.demo:main"
+mare-eval = "mare.eval:main"
 mare-ingest = "mare.ingest:main"
 mare-ask = "mare.ask:main"
 mare-ui = "mare.streamlit_app:main"
