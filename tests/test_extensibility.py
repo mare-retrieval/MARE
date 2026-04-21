@@ -8,6 +8,8 @@ from pathlib import Path
 
 import mare.ingest as ingest_module
 from mare import (
+    FAISSIndexer,
+    FAISSRetriever,
     FastEmbedReranker,
     IdentityReranker,
     KeywordBoostReranker,
@@ -431,3 +433,107 @@ def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> Non
     assert points[0].id == "doc-1"
     assert points[0].vector == {"text": [1.0, 2.0]}
     assert points[0].payload["metadata"]["section"] == "power"
+
+
+def test_faiss_indexer_writes_index_and_metadata(monkeypatch, tmp_path: Path) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            return [[float(index + 1), float(index + 2)] for index, _ in enumerate(texts)]
+
+    class _FakeIndex:
+        def __init__(self, dim: int) -> None:
+            self.dim = dim
+            self.vectors = []
+
+        def add(self, vectors) -> None:
+            self.vectors = list(vectors)
+
+    written = {}
+
+    def _write_index(index, path: str) -> None:
+        written["path"] = path
+        written["vectors"] = index.vectors
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    fake_faiss = types.ModuleType("faiss")
+    fake_faiss.IndexFlatIP = _FakeIndex
+    fake_faiss.write_index = _write_index
+    monkeypatch.setitem(sys.modules, "faiss", fake_faiss)
+
+    index_path = tmp_path / "manual.faiss"
+    metadata_path = tmp_path / "manual.metadata.json"
+    documents = [
+        Document(doc_id="doc-1", title="Manual", page=1, text="Connect the AC adapter.", metadata={"section": "power"}),
+        Document(doc_id="doc-2", title="Manual", page=2, text="Wake on LAN feature.", metadata={"section": "network"}),
+    ]
+
+    indexer = FAISSIndexer(index_path=index_path, metadata_path=metadata_path)
+    indexed = indexer.index_documents(documents, recreate=True)
+
+    assert indexed == 2
+    assert written["path"] == str(index_path)
+    assert len(written["vectors"]) == 2
+    payload = json.loads(metadata_path.read_text())
+    assert payload[0]["doc_id"] == "doc-1"
+    assert payload[0]["metadata"]["section"] == "power"
+
+
+def test_faiss_retriever_loads_saved_index(monkeypatch, tmp_path: Path) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            vectors = []
+            for text in texts:
+                normalized = text.lower()
+                if "adapter" in normalized:
+                    vectors.append([1.0, 0.0])
+                else:
+                    vectors.append([0.0, 1.0])
+            return vectors
+
+    class _FakeIndex:
+        def search(self, query_vector, top_k: int):
+            return [[0.92]], [[0]]
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    fake_faiss = types.ModuleType("faiss")
+    fake_faiss.read_index = lambda path: _FakeIndex()
+    monkeypatch.setitem(sys.modules, "faiss", fake_faiss)
+
+    index_path = tmp_path / "manual.faiss"
+    index_path.write_text("placeholder")
+    metadata_path = tmp_path / "manual.metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            [
+                {
+                    "doc_id": "doc-1",
+                    "title": "Manual",
+                    "page": 1,
+                    "text": "Connect the AC adapter to the computer.",
+                    "snippet": "Connect the AC adapter to the computer.",
+                    "page_image_path": "generated/manual/page-1.png",
+                    "metadata": {"section": "power"},
+                }
+            ]
+        )
+    )
+
+    retriever = FAISSRetriever([], index_path=index_path, metadata_path=metadata_path)
+    hits = retriever.retrieve("connect the adapter", top_k=1)
+
+    assert len(hits) == 1
+    assert hits[0].doc_id == "doc-1"
+    assert hits[0].score == 0.92
+    assert hits[0].metadata["section"] == "power"

@@ -64,6 +64,19 @@ def _encode_with_fallback(model, texts):
     return model.encode(texts)
 
 
+def _document_payload(document) -> dict:
+    snippet = (document.text or "")[:240]
+    return {
+        "doc_id": document.doc_id,
+        "title": document.title,
+        "page": document.page,
+        "text": document.text,
+        "snippet": snippet,
+        "page_image_path": document.page_image_path,
+        "metadata": document.metadata,
+    }
+
+
 @dataclass
 class MAREConfig:
     parser: str | DocumentParser | None = None
@@ -137,6 +150,120 @@ class SentenceTransformersRetriever(BaseRetriever):
             )
 
         return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+
+
+class FAISSRetriever(BaseRetriever):
+    """Local vector retriever backed by FAISS."""
+
+    modality = Modality.TEXT
+
+    def __init__(
+        self,
+        documents: list,
+        *,
+        index_path: str | Path | None = None,
+        metadata_path: str | Path | None = None,
+        embedder=None,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    ) -> None:
+        super().__init__(documents)
+        self.index_path = Path(index_path) if index_path is not None else None
+        self.metadata_path = Path(metadata_path) if metadata_path is not None else None
+        self.embedder = embedder
+        self.model_name = model_name
+        self._index = None
+        self._payloads = None
+
+    def _get_faiss(self):
+        try:
+            import faiss
+        except ImportError as exc:
+            raise RuntimeError(
+                "FAISSRetriever requires `faiss-cpu`. Install it with "
+                "`pip install 'mare-retrieval[faiss]'` or `pip install faiss-cpu`."
+            ) from exc
+        return faiss
+
+    def _get_embedder(self):
+        if self.embedder is not None:
+            return self.embedder
+        retriever = SentenceTransformersRetriever([], model_name=self.model_name)
+        model = retriever._get_model()
+        return lambda texts: list(_encode_with_fallback(model, texts))
+
+    @staticmethod
+    def _vector_matrix(vectors):
+        try:
+            import numpy as np
+        except ImportError:
+            return [_to_vector_list(vector) for vector in vectors]
+        return np.array([_to_vector_list(vector) for vector in vectors], dtype="float32")
+
+    def _build_in_memory_index(self):
+        if not self.documents:
+            return None, []
+        faiss = self._get_faiss()
+        embedder = self._get_embedder()
+        texts = [document.text or document.title for document in self.documents]
+        vectors = list(embedder(texts))
+        first_vector = _to_vector_list(vectors[0])
+        index = faiss.IndexFlatIP(len(first_vector))
+        index.add(self._vector_matrix(vectors))
+        payloads = [_document_payload(document) for document in self.documents]
+        return index, payloads
+
+    def _load_index_and_payloads(self):
+        if self._index is not None and self._payloads is not None:
+            return self._index, self._payloads
+
+        if self.index_path and self.index_path.exists():
+            faiss = self._get_faiss()
+            self._index = faiss.read_index(str(self.index_path))
+            if self.metadata_path is None:
+                self.metadata_path = self.index_path.with_suffix(".metadata.json")
+            if self.metadata_path.exists():
+                self._payloads = json.loads(self.metadata_path.read_text())
+            else:
+                self._payloads = []
+            return self._index, self._payloads
+
+        self._index, self._payloads = self._build_in_memory_index()
+        return self._index, self._payloads
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        from mare.retrievers.text import _best_snippet
+
+        index, payloads = self._load_index_and_payloads()
+        if index is None:
+            return []
+
+        embedder = self._get_embedder()
+        query_vector = self._vector_matrix(list(embedder([query])))
+        scores, indices = index.search(query_vector, top_k)
+
+        hits: list[RetrievalHit] = []
+        row_scores = list(scores[0]) if len(scores) else []
+        row_indices = list(indices[0]) if len(indices) else []
+        for score, hit_index in zip(row_scores, row_indices):
+            if hit_index < 0 or hit_index >= len(payloads):
+                continue
+            payload = payloads[hit_index]
+            snippet_source = str(payload.get("snippet") or payload.get("text") or "")
+            hits.append(
+                RetrievalHit(
+                    doc_id=str(payload.get("doc_id") or hit_index),
+                    title=str(payload.get("title") or payload.get("doc_id") or "FAISS result"),
+                    page=int(payload.get("page") or 0),
+                    modality=self.modality,
+                    score=round(float(score), 4),
+                    reason=f"FAISS semantic match via {self.model_name}",
+                    snippet=_best_snippet(snippet_source, query),
+                    page_image_path=str(payload.get("page_image_path") or ""),
+                    metadata=dict(payload.get("metadata") or {}),
+                )
+            )
+
+        return hits
 
 
 class DoclingParser:
@@ -556,16 +683,7 @@ class QdrantIndexer:
         return lambda texts: list(_encode_with_fallback(model, texts))
 
     def _payload_for_document(self, document) -> dict:
-        snippet = (document.text or "")[:240]
-        return {
-            "doc_id": document.doc_id,
-            "title": document.title,
-            "page": document.page,
-            "text": document.text,
-            "snippet": snippet,
-            "page_image_path": document.page_image_path,
-            "metadata": document.metadata,
-        }
+        return _document_payload(document)
 
     def index_documents(self, documents: list, recreate: bool = False) -> int:
         if not documents:
@@ -605,6 +723,74 @@ class QdrantIndexer:
 
         client.upsert(collection_name=self.collection_name, points=points)
         return len(points)
+
+
+class FAISSIndexer:
+    """Helper for indexing MARE documents into a local FAISS index."""
+
+    def __init__(
+        self,
+        index_path: str | Path,
+        *,
+        metadata_path: str | Path | None = None,
+        embedder=None,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    ) -> None:
+        self.index_path = Path(index_path)
+        self.metadata_path = Path(metadata_path) if metadata_path is not None else self.index_path.with_suffix(".metadata.json")
+        self.embedder = embedder
+        self.model_name = model_name
+
+    def _get_faiss(self):
+        try:
+            import faiss
+        except ImportError as exc:
+            raise RuntimeError(
+                "FAISSIndexer requires `faiss-cpu`. Install it with "
+                "`pip install 'mare-retrieval[faiss]'` or `pip install faiss-cpu`."
+            ) from exc
+        return faiss
+
+    def _get_embedder(self):
+        if self.embedder is not None:
+            return self.embedder
+        retriever = SentenceTransformersRetriever([], model_name=self.model_name)
+        model = retriever._get_model()
+        return lambda texts: list(_encode_with_fallback(model, texts))
+
+    @staticmethod
+    def _vector_matrix(vectors):
+        try:
+            import numpy as np
+        except ImportError:
+            return [_to_vector_list(vector) for vector in vectors]
+        return np.array([_to_vector_list(vector) for vector in vectors], dtype="float32")
+
+    def index_documents(self, documents: list, recreate: bool = False) -> int:
+        if not documents:
+            return 0
+
+        faiss = self._get_faiss()
+        embedder = self._get_embedder()
+        texts = [document.text or document.title for document in documents]
+        vectors = list(embedder(texts))
+        first_vector = _to_vector_list(vectors[0])
+
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.index_path.exists() and recreate:
+            self.index_path.unlink()
+        if self.metadata_path.exists() and recreate:
+            self.metadata_path.unlink()
+
+        index = faiss.IndexFlatIP(len(first_vector))
+        index.add(self._vector_matrix(vectors))
+        faiss.write_index(index, str(self.index_path))
+
+        payloads = [_document_payload(document) for document in documents]
+        self.metadata_path.write_text(json.dumps(payloads, indent=2))
+        return len(payloads)
 
 
 _PARSER_REGISTRY: dict[str, DocumentParser] = {

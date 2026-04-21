@@ -244,6 +244,7 @@ Built-in extension helpers:
 - `BuiltinPDFParser` for the default local pipeline
 - `DoclingParser` and `UnstructuredParser` for richer parsing stacks
 - `LangChain` and `LlamaIndex` adapters for ecosystem-friendly retrieval
+- `FAISSIndexer` and `FAISSRetriever` for local vector retrieval without a running service
 - `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
 - `FastEmbedReranker` for open-source cross-encoder reranking
 - `QdrantIndexer` for indexing MARE documents into a local or remote Qdrant collection
@@ -256,6 +257,7 @@ Recommended upgrade paths for developers:
 - `Docling` for richer local document parsing, layout, OCR, and table structure
 - `Unstructured` for document partitioning and element extraction
 - `FastEmbed` for local dense and sparse embeddings
+- `FAISS` for fast local vector search with minimal setup
 - `Qdrant` for hybrid dense/sparse/multivector retrieval and reranking pipelines
 - `BGE-M3` for flexible dense + sparse retrieval setups
 - `ColPali` for page-image retrieval when visual structure matters
@@ -266,6 +268,7 @@ Install optional integrations when you need them:
 
 ```bash
 pip install "mare-retrieval[docling]"
+pip install "mare-retrieval[faiss]"
 pip install "mare-retrieval[langchain]"
 pip install "mare-retrieval[llamaindex]"
 pip install "mare-retrieval[sentence-transformers]"
@@ -282,6 +285,7 @@ On a bigger machine or inside a production stack, you can upgrade pieces indepen
 
 - swap the parser for `Docling` or `Unstructured`
 - swap the text retriever for an embedding-backed retriever such as `SentenceTransformersRetriever`
+- add a local vector backend like `FAISS` when you want a stronger local stack
 - add a cross-encoder reranker
 - later plug in a vector backend like `Qdrant` and use `QdrantIndexer` to populate it
 
@@ -328,6 +332,31 @@ best = app.best_match("how do I connect the AC adapter")
 ```
 
 This is a good default upgrade path when you want stronger semantic matching with widely used open-source models from the Hugging Face ecosystem.
+
+Example: index locally with FAISS, then retrieve through MARE.
+
+```python
+from mare import FAISSIndexer, FAISSRetriever, MAREApp, MAREConfig, Modality, load_corpus
+
+app = load_corpus("generated/manual.json")
+
+indexer = FAISSIndexer("generated/manual.faiss")
+indexer.index_documents(app.documents, recreate=True)
+
+config = MAREConfig(
+    retriever_factories={
+        Modality.TEXT: lambda documents: FAISSRetriever(
+            documents,
+            index_path="generated/manual.faiss",
+        )
+    }
+)
+
+faiss_app = MAREApp.from_corpus("generated/manual.json", config=config)
+best = faiss_app.best_match("how do I connect the AC adapter")
+```
+
+This is the easiest local “next step” after the built-in retriever when you want a stronger vector setup without running an external service.
 
 Example: plug MARE into LangChain or LangGraph as a retriever.
 
