@@ -8,7 +8,7 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 setup(
     name="mare-retrieval",
     version="0.3.0",
-    description="Evidence-first PDF retrieval library that returns the best page, exact snippet, and visual evidence for a query.",
+    description="Evidence-first PDF retrieval library for developers and agents that returns the best page, exact snippet, highlight, and visual proof.",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Saisandeep Kantareddy",

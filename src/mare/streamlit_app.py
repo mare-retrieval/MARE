@@ -469,7 +469,7 @@ def main() -> None:
         <div class="mare-hero">
           <h1 style="margin:0 0 0.35rem 0;">MARE Playground</h1>
           <p style="margin:0; font-size:1.05rem; color:#334155;">
-            Ask a document a question, inspect the exact evidence, and see which parser, retriever, reranker, and framework output shape powered the run.
+            Explore MARE as a PDF evidence layer for developers and agents: ask a question, inspect the exact page and snippet, and see the visual proof and structured output behind the result.
           </p>
         </div>
         """,
@@ -488,7 +488,7 @@ def main() -> None:
         st.markdown("**How To Test**")
         st.write("1. Upload a PDF")
         st.write("2. Ask a concrete instruction question")
-        st.write("3. Inspect the highlighted evidence and stack used")
+        st.write("3. Inspect the highlighted evidence, stack used, and agent-facing output shape")
         st.markdown("**Good test prompts**")
         st.code("partially reinstall the set screws if they fall out", language="text")
         st.code("how do I connect the AC adapter", language="text")
@@ -545,7 +545,7 @@ def main() -> None:
         }
 
         st.markdown("---")
-        st.caption("The Streamlit app is for visual exploration. The Python package gives you deeper control over custom stacks, automation, and benchmarks.")
+        st.caption("The Streamlit app is the visual playground. The Python package is the deeper PDF evidence layer that developers and agents can call directly.")
 
     uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
     query = st.text_input(
@@ -600,7 +600,7 @@ def main() -> None:
               <div class="mare-label">Uploaded file</div>
               <div class="mare-value">{uploaded_pdf.name}</div>
               <p class="mare-mini" style="margin-top:0.8rem;">
-                Ask a question to see the best matching page, the exact snippet, the highlighted evidence image, and the stack used for that run.
+                Ask a question to see the best matching page, the exact snippet, the highlighted evidence image, and the structured stack/output MARE would expose to code or agents.
               </p>
             </div>
             """,

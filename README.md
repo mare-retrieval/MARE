@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
 [![Publish to PyPI](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml)
 
-MARE is an open-source Python library for evidence-first PDF retrieval.
+MARE is an open-source Python library for evidence-first PDF retrieval for developers and agents.
 
 Given a PDF and a question, MARE is built to return:
 
@@ -14,7 +14,15 @@ Given a PDF and a question, MARE is built to return:
 - a highlighted evidence image when the match can be localized
 - retrieval rationale for debugging and trust
 
-It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence.
+The bigger goal is simple:
+
+- let agents and applications ask questions over PDFs
+- return grounded evidence instead of vague document answers
+- make the answer inspectable as page, snippet, highlight, and visual proof
+
+MARE is meant to sit underneath agent logic and application logic as the PDF evidence layer.
+
+It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence that agents and developers can build on.
 
 Paper inspiration: https://arxiv.org/pdf/2602.17687
 
@@ -29,6 +37,26 @@ Paper inspiration: https://arxiv.org/pdf/2602.17687
 - Supports object-aware retrieval, with the strongest behavior today on procedures and sections
 - Exposes a Python API, CLI tools, and a Streamlit demo
 - Includes an evaluation harness for page/object/no-result benchmarking
+
+## The bigger picture
+
+MARE is not trying to be a full agent framework, vector database, or parser platform.
+
+MARE is trying to solve one hard layer well:
+
+```text
+question about a PDF -> grounded evidence -> agent/app uses that evidence
+```
+
+That means MARE should be the layer that returns:
+
+- the best page
+- the best snippet
+- the best retrieved object when possible
+- the highlight or visual proof
+- a structured result that code, agents, and workflows can consume
+
+The built-in stack is the recommended default today. The advanced parsers, retrievers, rerankers, and framework adapters exist so teams can plug MARE into bigger systems without losing the evidence-first output shape.
 
 ## What is still early or experimental
 
@@ -51,6 +79,12 @@ That is the core product shape of MARE:
 
 ```text
 PDF -> retrieval -> exact snippet -> page image -> highlighted evidence
+```
+
+For agents, the shape becomes:
+
+```text
+user question -> agent -> MARE -> page + snippet + highlight + proof
 ```
 
 ## Current architecture
@@ -111,6 +145,8 @@ pip install mare-retrieval
 ```
 
 That base install is intentionally lightweight. Optional stacks such as Streamlit, sentence-transformers, FAISS, LangChain, OCR parsers, and other advanced integrations are installed through extras.
+
+For most users, the best starting point is still MARE's built-in stack. The optional integrations are there to support experimentation, scaling, OCR-heavy documents, or agent/framework integration without changing the evidence-first contract.
 
 Then use it as a library:
 
@@ -175,6 +211,8 @@ Create an app from a PDF:
 app = load_pdf("manual.pdf", reuse=True)
 hit = app.best_match("what does MagSafe 3 refer to")
 ```
+
+This is the core library shape MARE is optimizing around: something an agent or application can call to get grounded PDF evidence, not just an answer-shaped blob.
 
 Create an app from an existing JSON corpus:
 
