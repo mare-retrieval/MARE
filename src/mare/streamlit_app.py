@@ -33,9 +33,9 @@ PARSER_OPTIONS = {
 }
 
 RETRIEVER_OPTIONS = {
-    "Built-in lexical": {
+    "Built-in lexical (Recommended)": {
         "value": "builtin",
-        "description": "Uses MARE's default page and object-aware retrieval stack.",
+        "description": "Uses MARE's strongest default page and object-aware retrieval stack.",
         "extra": "core",
     },
     "Sentence Transformers": {
@@ -497,6 +497,7 @@ def main() -> None:
         st.write("1. Upload a PDF")
         st.write("2. Ask a concrete instruction question")
         st.write("3. Inspect the highlighted evidence, stack used, and agent-facing output shape")
+        st.caption("Recommended starting point: `Basic` mode, which uses the built-in parser and built-in lexical evidence retrieval.")
         st.markdown("**Good test prompts**")
         st.code("partially reinstall the set screws if they fall out", language="text")
         st.code("how do I connect the AC adapter", language="text")
@@ -534,7 +535,7 @@ def main() -> None:
                 qdrant_index_before_query = st.checkbox("Index current PDF into Qdrant before retrieval", value=False)
         else:
             parser_label = "Builtin PDF"
-            retriever_label = "Built-in lexical"
+            retriever_label = "Built-in lexical (Recommended)"
             reranker_label = "None"
             output_label = "MARE evidence"
             reuse_corpus = False
@@ -556,6 +557,8 @@ def main() -> None:
 
         st.markdown("---")
         st.caption("The Streamlit app is the visual playground. The Python package is the deeper PDF evidence layer that developers and agents can call directly.")
+        if mode == "Basic":
+            st.success("Using the recommended default stack: Builtin PDF + built-in lexical evidence retrieval.")
 
     uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
     query = st.text_input(
