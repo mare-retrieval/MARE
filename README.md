@@ -197,7 +197,7 @@ mv ./*.pdf ./manual.pdf
 PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws if they fall out"
 ```
 
-## Benchmarking real manuals
+## Benchmarking real corpora
 
 MARE now supports stack comparison in the eval harness so you can compare the built-in default against stronger advanced paths on the same corpus.
 
@@ -221,11 +221,22 @@ PYTHONPATH=src python3 -m mare.eval \
   --stack hybrid-semantic
 ```
 
+Example: compare on a research paper corpus:
+
+```bash
+PYTHONPATH=src python3 -m mare.eval \
+  --corpus generated/543_Thinking_with_Reasoning_Sk.json \
+  --eval examples/research_paper_eval_cases.json \
+  --stack builtin \
+  --stack hybrid-semantic
+```
+
 These example eval files are intentionally small and opinionated. They are meant to help you compare:
 
 - the default built-in retrieval path
 - the hybrid semantic path
 - whether semantic retrieval is actually improving grounded evidence on your PDFs
+- how MARE behaves across different PDF genres such as manuals and research papers
 
 ## Public Python API
 

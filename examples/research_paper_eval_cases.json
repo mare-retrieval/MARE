@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "query": "what are the key contributions",
+      "expected_doc_id": "543_thinking_with_reasoning_sk-p2",
+      "expected_page": 2,
+      "expected_object_type": "section",
+      "top_k": 3
+    },
+    {
+      "query": "show me figure 2",
+      "expected_doc_id": "543_thinking_with_reasoning_sk-p3",
+      "expected_page": 3,
+      "expected_object_type": "figure",
+      "top_k": 3
+    },
+    {
+      "query": "show me table 1",
+      "expected_doc_id": "543_thinking_with_reasoning_sk-p5",
+      "expected_page": 5,
+      "expected_object_type": "table",
+      "top_k": 3
+    }
+  ]
+}
