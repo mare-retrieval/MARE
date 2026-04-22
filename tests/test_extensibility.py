@@ -23,7 +23,7 @@ from mare import (
 )
 from mare.extensions import DoclingParser, MAREConfig, UnstructuredParser, get_parser
 from mare.retrievers.base import BaseRetriever
-from mare.types import Document, Modality, RetrievalHit
+from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
 
 
 class _CustomParser:
@@ -496,6 +496,52 @@ def test_sentence_transformers_retriever_surfaces_environment_guidance(monkeypat
 
     with pytest.raises(RuntimeError, match="numpy<2"):
         retriever.retrieve("adapter", top_k=1)
+
+
+def test_sentence_transformers_retriever_preserves_object_and_highlight_enrichment(monkeypatch, tmp_path: Path) -> None:
+    class _FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def encode(self, texts, **kwargs):
+            return [[1.0, 0.0] for _ in texts]
+
+    fake_st_module = types.ModuleType("sentence_transformers")
+    fake_st_module.SentenceTransformer = _FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st_module)
+
+    highlight_path = tmp_path / "highlight.png"
+    highlight_path.write_bytes(b"fake")
+    monkeypatch.setattr("mare.highlight.render_highlighted_page", lambda **kwargs: str(highlight_path))
+
+    documents = [
+        Document(
+            doc_id="doc-1",
+            title="Manual",
+            page=10,
+            text="Connect the AC adapter to the laptop.",
+            page_image_path=str(tmp_path / "page-10.png"),
+            metadata={"source": str(tmp_path / "manual.pdf")},
+                objects=[
+                    DocumentObject(
+                        object_id="doc-1:procedure:1",
+                        doc_id="doc-1",
+                        page=10,
+                        object_type=ObjectType.PROCEDURE,
+                        content="Connect the AC adapter to the laptop.",
+                        metadata={},
+                    )
+            ],
+        )
+    ]
+
+    retriever = SentenceTransformersRetriever(documents)
+    hits = retriever.retrieve("how do I connect the adapter", top_k=1)
+
+    assert len(hits) == 1
+    assert hits[0].object_type == "procedure"
+    assert hits[0].highlight_image_path == str(highlight_path)
+    assert "AC adapter" in hits[0].snippet
 
 
 def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> None:

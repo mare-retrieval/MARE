@@ -503,16 +503,23 @@ class SentenceTransformersRetriever(BaseRetriever):
         return self._doc_embeddings
 
     def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
-        from mare.retrievers.text import _best_snippet
+        from mare.highlight import render_highlighted_page, render_object_region_highlight
+        from mare.retrievers.text import _best_object, _best_snippet, _content_tokens
 
         model = self._get_model()
         query_embedding = list(_encode_with_fallback(model, [query]))[0]
+        query_tokens = _content_tokens(query)
         hits: list[RetrievalHit] = []
 
         for document, embedding in zip(self.documents, self._get_doc_embeddings()):
             score = round(_cosine_similarity(query_embedding, embedding), 4)
             if score <= 0:
                 continue
+            best_object, _, _, _ = _best_object(query_tokens, document.objects)
+            snippet = best_object.content if best_object else _best_snippet(document.text or document.title, query)
+            hit_metadata = dict(document.metadata)
+            if best_object:
+                hit_metadata.update(best_object.metadata)
             hits.append(
                 RetrievalHit(
                     doc_id=document.doc_id,
@@ -521,13 +528,34 @@ class SentenceTransformersRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=f"sentence-transformers semantic match via {self.model_name}",
-                    snippet=_best_snippet(document.text or document.title, query),
+                    snippet=snippet,
                     page_image_path=document.page_image_path,
-                    metadata=dict(document.metadata),
+                    object_id=best_object.object_id if best_object else "",
+                    object_type=best_object.object_type.value if best_object else "",
+                    metadata=hit_metadata,
                 )
             )
 
-        return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+        top_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+        for hit in top_hits:
+            source_pdf = hit.metadata.get("source", "")
+            if source_pdf and hit.page_image_path and hit.snippet:
+                hit.highlight_image_path = render_highlighted_page(
+                    pdf_path=source_pdf,
+                    page_number=hit.page,
+                    page_image_path=hit.page_image_path,
+                    query=query,
+                    snippet=hit.snippet,
+                )
+            if not hit.highlight_image_path and hit.page_image_path and hit.object_type in {"table", "figure", "section"}:
+                hit.highlight_image_path = render_object_region_highlight(
+                    page_image_path=hit.page_image_path,
+                    page_number=hit.page,
+                    object_type=hit.object_type,
+                    metadata=hit.metadata,
+                )
+
+        return top_hits
 
 
 class FAISSRetriever(BaseRetriever):
