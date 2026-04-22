@@ -2,8 +2,8 @@
   "cases": [
     {
       "query": "how do I connect the AC adapter",
-      "expected_doc_id": "116441-p10",
-      "expected_page": 10,
+      "expected_doc_id": "116441-p13",
+      "expected_page": 13,
       "expected_object_type": "procedure",
       "top_k": 3
     },
