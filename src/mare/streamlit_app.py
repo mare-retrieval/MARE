@@ -304,17 +304,17 @@ def _render_stack_summary(st, stack: dict) -> None:
 
 
 def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
-    from mare import (
+    from mare.api import load_pdf
+    from mare.extensions import (
         FAISSRetriever,
         FastEmbedReranker,
         HybridSemanticRetriever,
         MAREConfig,
-        Modality,
         QdrantHybridRetriever,
         QdrantIndexer,
         SentenceTransformersRetriever,
-        load_pdf,
     )
+    from mare.types import Modality
 
     retriever_factories = {}
     reranker = None
