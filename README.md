@@ -481,6 +481,45 @@ result = tool.invoke({"query": "how do I configure wake on lan"})
 
 The tool returns structured evidence with page, snippet, highlight path, and metadata, which fits naturally into agent/tool workflows where the LLM needs grounded retrieval output instead of a plain text blob.
 
+## MCP server for agents
+
+If you want agents outside Python to call MARE as a reusable tool layer, MARE now includes a first MCP server surface.
+
+Install:
+
+```bash
+pip install "mare-retrieval[mcp]"
+```
+
+Run:
+
+```bash
+mare-mcp
+```
+
+The MCP server exposes focused tools for the evidence layer:
+
+- `ingest_pdf`
+- `query_pdf`
+- `query_corpus`
+- `page_objects`
+
+These tools return structured MARE-shaped payloads with grounded evidence such as:
+
+- `page`
+- `snippet`
+- `highlight_image_path`
+- `object_type`
+- `reason`
+
+This is the intended agent architecture:
+
+```text
+user -> agent -> MARE MCP tool -> page + snippet + highlight + proof
+```
+
+So MARE stays the PDF evidence layer, while the agent keeps responsibility for planning, orchestration, and final response generation.
+
 Example: plug MARE into LlamaIndex as a retriever.
 
 ```python

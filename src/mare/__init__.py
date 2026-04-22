@@ -31,6 +31,7 @@ from .integrations import (
     hit_to_langchain_document,
     hit_to_llamaindex_node,
 )
+from .mcp_server import create_mcp_server, ingest_pdf_tool, page_objects_tool, query_corpus_tool, query_pdf_tool
 from .router import HeuristicModalityRouter
 from .types import Document, Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 
@@ -39,6 +40,7 @@ __all__ = [
     "create_langgraph_tool",
     "create_langchain_retriever",
     "create_llamaindex_retriever",
+    "create_mcp_server",
     "Document",
     "DoclingParser",
     "EvalCase",
@@ -52,6 +54,7 @@ __all__ = [
     "hits_to_evidence_payload",
     "hit_to_langchain_document",
     "hit_to_llamaindex_node",
+    "ingest_pdf_tool",
     "IdentityReranker",
     "KeywordBoostReranker",
     "get_parser",
@@ -65,7 +68,10 @@ __all__ = [
     "MAREngine",
     "Modality",
     "PaddleOCRParser",
+    "page_objects_tool",
     "QueryPlan",
+    "query_corpus_tool",
+    "query_pdf_tool",
     "QdrantIndexer",
     "QdrantHybridRetriever",
     "register_parser",

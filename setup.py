@@ -25,6 +25,7 @@ setup(
         "langchain": ["langchain-core>=0.3.0"],
         "langgraph": ["langchain-core>=0.3.0", "langgraph>=0.3.0"],
         "llamaindex": ["llama-index-core>=0.12.0"],
+        "mcp": ["mcp>=1.0.0"],
         "paddleocr": ["paddleocr>=3.3.0"],
         "sentence-transformers": ["sentence-transformers>=3.0.0"],
         "surya": ["surya-ocr>=0.17.0", "pillow>=10.0.0"],
@@ -52,6 +53,7 @@ setup(
             "mare-ingest=mare.ingest:main",
             "mare-ask=mare.ask:main",
             "mare-ui=mare.streamlit_app:main",
+            "mare-mcp=mare.mcp_server:main",
         ]
     },
 )
