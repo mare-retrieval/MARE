@@ -12,6 +12,7 @@ from mare import (
     FAISSIndexer,
     FAISSRetriever,
     FastEmbedReranker,
+    HybridSemanticRetriever,
     IdentityReranker,
     KeywordBoostReranker,
     MAREApp,
@@ -542,6 +543,59 @@ def test_sentence_transformers_retriever_preserves_object_and_highlight_enrichme
     assert hits[0].object_type == "procedure"
     assert hits[0].highlight_image_path == str(highlight_path)
     assert "AC adapter" in hits[0].snippet
+
+
+def test_hybrid_semantic_retriever_preserves_lexical_evidence_and_semantic_reason(monkeypatch, tmp_path: Path) -> None:
+    highlight_path = tmp_path / "highlight.png"
+    highlight_path.write_bytes(b"fake")
+
+    lexical_hit = RetrievalHit(
+        doc_id="doc-1",
+        title="Manual",
+        page=10,
+        modality=Modality.TEXT,
+        score=0.9,
+        reason="Matched text terms: adapter",
+        snippet="Connect the AC adapter to the laptop.",
+        page_image_path=str(tmp_path / "page-10.png"),
+        highlight_image_path=str(highlight_path),
+        object_id="doc-1:procedure:1",
+        object_type="procedure",
+        metadata={"source": str(tmp_path / "manual.pdf")},
+    )
+    semantic_hit = RetrievalHit(
+        doc_id="doc-1",
+        title="Manual",
+        page=10,
+        modality=Modality.TEXT,
+        score=0.8,
+        reason="sentence-transformers semantic match via all-MiniLM",
+        snippet="adapter setup",
+        page_image_path=str(tmp_path / "page-10.png"),
+        metadata={"source": str(tmp_path / "manual.pdf")},
+    )
+
+    class _StubLexicalRetriever:
+        def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+            return [lexical_hit]
+
+    class _StubSemanticRetriever:
+        def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+            return [semantic_hit]
+
+    retriever = HybridSemanticRetriever(
+        [Document(doc_id="doc-1", title="Manual", page=10, text="Connect the AC adapter to the laptop.")],
+        lexical_retriever=_StubLexicalRetriever(),
+        semantic_retriever=_StubSemanticRetriever(),
+    )
+    hits = retriever.retrieve("how do I connect the adapter", top_k=1)
+
+    assert len(hits) == 1
+    assert hits[0].object_type == "procedure"
+    assert hits[0].highlight_image_path == str(highlight_path)
+    assert hits[0].snippet == "Connect the AC adapter to the laptop."
+    assert "lexical:" in hits[0].reason
+    assert "semantic:" in hits[0].reason
 
 
 def test_qdrant_indexer_builds_collection_and_upserts_points(monkeypatch) -> None:

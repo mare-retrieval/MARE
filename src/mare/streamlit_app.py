@@ -43,6 +43,11 @@ RETRIEVER_OPTIONS = {
         "description": "Drop-in semantic retrieval with Hugging Face models.",
         "extra": "mare-retrieval[sentence-transformers]",
     },
+    "Hybrid semantic + lexical": {
+        "value": "hybrid-semantic",
+        "description": "Recommended advanced mode: keeps MARE's lexical/object-aware evidence behavior and adds semantic lift.",
+        "extra": "mare-retrieval[sentence-transformers]",
+    },
     "FAISS local vector": {
         "value": "faiss",
         "description": "Stronger local vector search without running an external service.",
@@ -302,6 +307,7 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
     from mare import (
         FAISSRetriever,
         FastEmbedReranker,
+        HybridSemanticRetriever,
         MAREConfig,
         Modality,
         QdrantHybridRetriever,
@@ -315,6 +321,8 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
 
     if retriever_key == "sentence-transformers":
         retriever_factories[Modality.TEXT] = lambda documents: SentenceTransformersRetriever(documents)
+    elif retriever_key == "hybrid-semantic":
+        retriever_factories[Modality.TEXT] = lambda documents: HybridSemanticRetriever(documents)
     elif retriever_key == "faiss":
         retriever_factories[Modality.TEXT] = lambda documents: FAISSRetriever(documents)
     elif retriever_key == "qdrant":
@@ -504,6 +512,8 @@ def main() -> None:
             retriever_label = st.selectbox("Retriever", _option_labels(RETRIEVER_OPTIONS), index=0)
             retriever_meta = _selected_option_payload(RETRIEVER_OPTIONS, retriever_label)
             st.caption(f"{retriever_meta['description']} Install: `{retriever_meta['extra']}`")
+            if retriever_meta["value"] == "hybrid-semantic":
+                st.info("Recommended advanced option for most real PDFs. It preserves MARE's evidence-first lexical behavior and adds semantic retrieval on top.")
 
             reranker_label = st.selectbox("Reranker", _option_labels(RERANKER_OPTIONS), index=0)
             reranker_meta = _selected_option_payload(RERANKER_OPTIONS, reranker_label)

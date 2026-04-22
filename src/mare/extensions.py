@@ -9,6 +9,7 @@ from typing import Callable, Protocol
 from mare.ingest import ingest_pdf
 from mare.objects import extract_document_objects
 from mare.retrievers.base import BaseRetriever
+from mare.retrievers.text import TextRetriever
 from mare.types import DocumentObject, Modality, ObjectType, RetrievalHit
 
 
@@ -556,6 +557,76 @@ class SentenceTransformersRetriever(BaseRetriever):
                 )
 
         return top_hits
+
+
+class HybridSemanticRetriever(BaseRetriever):
+    """Hybrid retriever that preserves MARE's lexical/object-aware behavior and adds semantic lift."""
+
+    modality = Modality.TEXT
+
+    def __init__(
+        self,
+        documents: list,
+        *,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        lexical_weight: float = 0.7,
+        semantic_weight: float = 0.3,
+        semantic_retriever: SentenceTransformersRetriever | None = None,
+        lexical_retriever: TextRetriever | None = None,
+    ) -> None:
+        super().__init__(documents)
+        self.lexical_weight = lexical_weight
+        self.semantic_weight = semantic_weight
+        self.semantic_retriever = semantic_retriever or SentenceTransformersRetriever(documents, model_name=model_name)
+        self.lexical_retriever = lexical_retriever or TextRetriever(documents)
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        lexical_hits = self.lexical_retriever.retrieve(query=query, top_k=max(top_k * 2, top_k))
+        semantic_hits = self.semantic_retriever.retrieve(query=query, top_k=max(top_k * 2, top_k))
+
+        lexical_by_doc = {hit.doc_id: hit for hit in lexical_hits}
+        semantic_by_doc = {hit.doc_id: hit for hit in semantic_hits}
+        doc_ids = list(dict.fromkeys([hit.doc_id for hit in lexical_hits + semantic_hits]))
+
+        lexical_max = max((hit.score for hit in lexical_hits), default=1.0) or 1.0
+        semantic_max = max((hit.score for hit in semantic_hits), default=1.0) or 1.0
+
+        merged: list[RetrievalHit] = []
+        for doc_id in doc_ids:
+            lexical_hit = lexical_by_doc.get(doc_id)
+            semantic_hit = semantic_by_doc.get(doc_id)
+            if not lexical_hit and not semantic_hit:
+                continue
+
+            lexical_norm = (lexical_hit.score / lexical_max) if lexical_hit else 0.0
+            semantic_norm = (semantic_hit.score / semantic_max) if semantic_hit else 0.0
+            hybrid_score = round((self.lexical_weight * lexical_norm) + (self.semantic_weight * semantic_norm), 4)
+
+            primary = lexical_hit or semantic_hit
+            reason_parts: list[str] = []
+            if lexical_hit:
+                reason_parts.append(f"lexical:{lexical_hit.reason}")
+            if semantic_hit:
+                reason_parts.append(f"semantic:{semantic_hit.reason}")
+
+            merged.append(
+                RetrievalHit(
+                    doc_id=primary.doc_id,
+                    title=primary.title,
+                    page=primary.page,
+                    modality=self.modality,
+                    score=hybrid_score,
+                    reason=" | ".join(reason_parts),
+                    snippet=lexical_hit.snippet if lexical_hit and lexical_hit.snippet else primary.snippet,
+                    page_image_path=primary.page_image_path,
+                    highlight_image_path=lexical_hit.highlight_image_path if lexical_hit else primary.highlight_image_path,
+                    object_id=lexical_hit.object_id if lexical_hit else primary.object_id,
+                    object_type=lexical_hit.object_type if lexical_hit else primary.object_type,
+                    metadata=dict((lexical_hit or primary).metadata),
+                )
+            )
+
+        return sorted(merged, key=lambda hit: hit.score, reverse=True)[:top_k]
 
 
 class FAISSRetriever(BaseRetriever):

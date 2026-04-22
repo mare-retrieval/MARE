@@ -288,6 +288,7 @@ Built-in extension helpers:
 - `PaddleOCRParser` and `SuryaParser` for OCR-first parsing on scanned or image-heavy PDFs
 - `FAISSIndexer` and `FAISSRetriever` for local vector retrieval without a running service
 - `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
+- `HybridSemanticRetriever` for the recommended advanced path that preserves MARE's lexical/object-aware evidence behavior and adds semantic lift
 - `FastEmbedReranker` for open-source cross-encoder reranking
 - `QdrantIndexer` for indexing MARE documents into a local or remote Qdrant collection
 - `QdrantHybridRetriever` for vector-backed retrieval on local or remote Qdrant collections
