@@ -497,6 +497,21 @@ Run:
 mare-mcp
 ```
 
+Or point an MCP-capable client at the included example stdio config:
+
+```json
+{
+  "mcpServers": {
+    "mare": {
+      "command": "mare-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+See [examples/mcp_stdio_config.json](/Users/saisandeepkantareddy/Downloads/MARE/examples/mcp_stdio_config.json).
+
 The MCP server exposes focused tools for the evidence layer:
 
 - `ingest_pdf`
@@ -519,6 +534,45 @@ user -> agent -> MARE MCP tool -> page + snippet + highlight + proof
 ```
 
 So MARE stays the PDF evidence layer, while the agent keeps responsibility for planning, orchestration, and final response generation.
+
+Typical flow for an agent builder:
+
+1. Install the MCP extra:
+
+```bash
+pip install "mare-retrieval[mcp]"
+```
+
+2. Register `mare-mcp` in your MCP-capable client using the example config above.
+
+3. Have your agent call:
+   - `query_pdf` when it has a PDF path and needs grounded evidence directly
+   - `query_corpus` when the PDF was already ingested and you want faster repeated retrieval
+   - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables
+
+4. Use the returned payload to answer with evidence:
+   - `page`
+   - `snippet`
+   - `highlight_image_path`
+   - `object_type`
+   - `reason`
+
+Example tool result shape:
+
+```json
+{
+  "query": "how do I connect the AC adapter",
+  "results": [
+    {
+      "page": 10,
+      "snippet": "Connect the AC adapter to the laptop.",
+      "highlight_image_path": "generated/manual/highlights/page-10-abc123.png",
+      "object_type": "procedure",
+      "reason": "lexical:Matched text terms: adapter | semantic:sentence-transformers semantic match via sentence-transformers/all-MiniLM-L6-v2"
+    }
+  ]
+}
+```
 
 Example: plug MARE into LlamaIndex as a retriever.
 

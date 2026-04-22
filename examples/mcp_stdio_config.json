@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mare": {
+      "command": "mare-mcp",
+      "args": []
+    }
+  }
+}
