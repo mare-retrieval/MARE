@@ -63,9 +63,9 @@ mare-ui = "mare.streamlit_app:main"
 mare-mcp = "mare.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/SaiSandeepKantareddy/MARE"
-Repository = "https://github.com/SaiSandeepKantareddy/MARE"
-Issues = "https://github.com/SaiSandeepKantareddy/MARE/issues"
+Homepage = "https://github.com/mare-retrieval/MARE"
+Repository = "https://github.com/mare-retrieval/MARE"
+Issues = "https://github.com/mare-retrieval/MARE/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

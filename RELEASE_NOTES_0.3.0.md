@@ -45,5 +45,5 @@ pip install "mare-retrieval[integrations]"
 
 ### Docs
 
-- GitHub: https://github.com/SaiSandeepKantareddy/MARE
+- GitHub: https://github.com/mare-retrieval/MARE
 - PyPI: https://pypi.org/project/mare-retrieval/

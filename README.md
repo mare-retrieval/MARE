@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
-[![Publish to PyPI](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/SaiSandeepKantareddy/MARE/actions/workflows/publish.yml)
+[![Publish to PyPI](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml)
 
 MARE is an open-source Python library for evidence-first PDF retrieval for developers and agents.
 
@@ -125,7 +125,7 @@ tests/
 Clone and install:
 
 ```bash
-git clone https://github.com/SaiSandeepKantareddy/MARE.git
+git clone https://github.com/mare-retrieval/MARE.git
 cd MARE
 python3 -m venv .venv
 source .venv/bin/activate
@@ -135,7 +135,7 @@ pip install -e ".[dev]"
 Or install directly from GitHub:
 
 ```bash
-pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"
+pip install "git+https://github.com/mare-retrieval/MARE.git"
 ```
 
 The intended package install after PyPI release is:
@@ -148,7 +148,7 @@ What each install path gives you:
 
 - `git clone` by itself does not install anything. It only gives you the source tree.
 - `pip install mare-retrieval` installs the lightweight core package from PyPI.
-- `pip install "git+https://github.com/SaiSandeepKantareddy/MARE.git"` installs the same core package directly from GitHub.
+- `pip install "git+https://github.com/mare-retrieval/MARE.git"` installs the same core package directly from GitHub.
 - `pip install -e ".[dev]"` from a clone installs the repo in editable mode plus test dependencies.
 
 That base install is intentionally lightweight. It is enough for the built-in stack:
