@@ -54,6 +54,14 @@ pip install notebook
 jupyter notebook examples/developer_playground.ipynb
 ```
 
+Important:
+
+- the notebook is part of the GitHub repository, not the installed PyPI package
+- it is for developers working from a local clone
+- if you only install `mare-retrieval`, use the library and CLI examples from `README.md`
+
+The repository also includes a few tiny bundled example PDFs in `examples/sample_pdfs/` for quick smoke tests.
+
 ## First Files To Read
 
 If you are new to the repo, read these first:
@@ -153,6 +161,9 @@ It is intended to help developers:
 - inspect the winning evidence
 - inspect extracted objects
 - understand the core stack before installing optional extras
+
+It assumes you are working from a local clone of the repository.
+By default, it can point at the bundled PDFs in `examples/sample_pdfs/`.
 
 ## Retrieval Quality Priorities
 

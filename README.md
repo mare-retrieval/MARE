@@ -209,6 +209,19 @@ These are designed to help you:
 - inspect the returned evidence
 - look at extracted page objects
 - explore MARE from the core install before deciding which optional extras you need
+- use bundled example PDFs from `examples/sample_pdfs/` if you just want a quick smoke test
+
+Important:
+
+- the notebook lives in the GitHub repository, not in the installed PyPI package
+- it is meant for developers working from a local clone of the repo
+- if you only run `pip install mare-retrieval`, use the Python API and CLI examples in this README instead
+
+Bundled repository example PDFs:
+
+- `examples/sample_pdfs/device_setup_guide.pdf`
+- `examples/sample_pdfs/retrieval_benchmark_note.pdf`
+- `examples/sample_pdfs/support_troubleshooting_card.pdf`
 
 If you are working from a clone:
 
