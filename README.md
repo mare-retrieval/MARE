@@ -355,6 +355,15 @@ app = load_corpus("generated/manual.json")
 results = app.retrieve("how do I configure wake on lan", top_k=3)
 ```
 
+Example: agent-style corpus inspection before final retrieval.
+
+```python
+app = load_corpus("generated/manual.json")
+summary = app.describe_corpus(page_limit=3, object_limit=2)
+candidate_objects = app.search_objects("wake on lan", object_type="section", limit=5)
+final_hits = app.retrieve("how do I configure wake on lan", top_k=3)
+```
+
 Core methods:
 
 - `MAREApp.from_pdf(...)`
@@ -704,6 +713,16 @@ pip install "mare-retrieval[mcp]"
    - `highlight_image_path`
    - `object_type`
    - `reason`
+
+Example: run the full agent-style workflow locally against a corpus:
+
+```bash
+PYTHONPATH=src python3 examples/agent_workflow.py \
+  --corpus generated/manual.json \
+  --query "how do I configure wake on lan" \
+  --object-query "wake on lan" \
+  --object-type section
+```
 
 Example tool result shape:
 
