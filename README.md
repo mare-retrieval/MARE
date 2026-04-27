@@ -363,6 +363,16 @@ Core methods:
 - `app.explain(query)`
 - `app.retrieve(query)`
 - `app.best_match(query)`
+- `app.describe_corpus()`
+- `app.search_objects(query, object_type=...)`
+
+Example: inspect the evidence corpus before asking a question.
+
+```python
+app = load_corpus("generated/manual.json")
+summary = app.describe_corpus(page_limit=3, object_limit=2)
+objects = app.search_objects("wake on lan", object_type="section", limit=5)
+```
 
 ## Developer-friendly extension points
 
@@ -652,6 +662,8 @@ The MCP server exposes focused tools for the evidence layer:
 - `query_pdf`
 - `query_corpus`
 - `page_objects`
+- `describe_corpus`
+- `search_objects`
 
 These tools return structured MARE-shaped payloads with grounded evidence such as:
 
@@ -680,9 +692,11 @@ pip install "mare-retrieval[mcp]"
 2. Register `mare-mcp` in your MCP-capable client using the example config above.
 
 3. Have your agent call:
+   - `describe_corpus` first when it needs to understand what pages, signals, and object types exist in the PDF
    - `query_pdf` when it has a PDF path and needs grounded evidence directly
    - `query_corpus` when the PDF was already ingested and you want faster repeated retrieval
-   - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables
+   - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables on one page
+   - `search_objects` when the agent wants to browse extracted evidence objects before doing a final retrieval pass
 
 4. Use the returned payload to answer with evidence:
    - `page`

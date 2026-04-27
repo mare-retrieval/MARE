@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
+from typing import Any
 
 from mare.demo import load_documents
 from mare.engine import MAREngine
@@ -76,6 +78,86 @@ class MAREApp:
         objects = document.objects
         return objects[:limit] if limit is not None else objects
 
+    def describe_corpus(self, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
+        object_counts: dict[str, int] = {}
+        pages: list[dict[str, Any]] = []
+
+        for document in self.documents:
+            page_object_counts: dict[str, int] = {}
+            for obj in document.objects:
+                object_name = obj.object_type.value
+                object_counts[object_name] = object_counts.get(object_name, 0) + 1
+                page_object_counts[object_name] = page_object_counts.get(object_name, 0) + 1
+
+            if len(pages) < page_limit:
+                pages.append(
+                    {
+                        "doc_id": document.doc_id,
+                        "title": document.title,
+                        "page": document.page,
+                        "layout_hints": document.layout_hints,
+                        "signals": document.metadata.get("signals", ""),
+                        "preview_text": self._preview_text(document.text),
+                        "object_counts": page_object_counts,
+                        "objects": [
+                            self._serialize_object(obj)
+                            for obj in document.objects[:object_limit]
+                        ],
+                    }
+                )
+
+        return {
+            "corpus_path": str(self.corpus_path) if self.corpus_path else "",
+            "source_pdf": str(self.source_pdf) if self.source_pdf else "",
+            "title": self.documents[0].title if self.documents else "",
+            "page_count": len(self.documents),
+            "document_count": len(self.documents),
+            "object_counts": object_counts,
+            "available_object_types": sorted(object_counts),
+            "pages": pages,
+        }
+
+    def search_objects(
+        self,
+        query: str,
+        object_type: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return []
+
+        normalized_object_type = object_type.lower() if object_type else None
+        matches: list[tuple[float, DocumentObject, Document]] = []
+
+        for document in self.documents:
+            for obj in document.objects:
+                if normalized_object_type and obj.object_type.value != normalized_object_type:
+                    continue
+
+                content = obj.content.lower()
+                label = obj.metadata.get("label", "").lower()
+                overlap = sum(1 for token in query_tokens if token in content or token in label)
+                if overlap == 0:
+                    continue
+
+                score = overlap / max(len(query_tokens), 1)
+                if label:
+                    score += 0.2 * sum(1 for token in query_tokens if token in label)
+                matches.append((score, obj, document))
+
+        matches.sort(key=lambda item: (-item[0], item[1].page, item[1].object_id))
+        return [
+            {
+                **self._serialize_object(obj),
+                "title": document.title,
+                "score": round(score, 4),
+                "page_image_path": document.page_image_path,
+                "signals": document.metadata.get("signals", ""),
+            }
+            for score, obj, document in matches[:limit]
+        ]
+
     def as_langchain_retriever(self, top_k: int = 3):
         from mare.integrations import create_langchain_retriever
 
@@ -90,6 +172,28 @@ class MAREApp:
         from mare.integrations import create_llamaindex_retriever
 
         return create_llamaindex_retriever(self, top_k=top_k)
+
+    @staticmethod
+    def _preview_text(text: str, limit: int = 220) -> str:
+        compact = " ".join(text.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _serialize_object(obj: DocumentObject) -> dict[str, Any]:
+        return {
+            "object_id": obj.object_id,
+            "doc_id": obj.doc_id,
+            "page": obj.page,
+            "object_type": obj.object_type.value,
+            "content": obj.content,
+            "metadata": obj.metadata,
+        }
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        return re.findall(r"[a-z0-9]+", text.lower())
 
 
 def load_corpus(corpus_path: str | Path, config: MAREConfig | None = None) -> MAREApp:

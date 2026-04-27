@@ -73,6 +73,26 @@ def page_objects_tool(corpus_path: str, doc_id: str, limit: int = 10) -> dict[st
     }
 
 
+def describe_corpus_tool(corpus_path: str, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
+    app = load_corpus(corpus_path=corpus_path)
+    return app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
+
+
+def search_objects_tool(
+    corpus_path: str,
+    query: str,
+    object_type: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    app = load_corpus(corpus_path=corpus_path)
+    return {
+        "corpus_path": str(corpus_path),
+        "query": query,
+        "object_type": object_type or "",
+        "results": app.search_objects(query=query, object_type=object_type, limit=limit),
+    }
+
+
 def create_mcp_server():
     try:
         from mcp.server.fastmcp import FastMCP
@@ -127,6 +147,23 @@ def create_mcp_server():
 
         return page_objects_tool(corpus_path=corpus_path, doc_id=doc_id, limit=limit)
 
+    @server.tool()
+    def describe_corpus(corpus_path: str, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
+        """Summarize a MARE corpus so an agent can understand what pages, objects, and signals exist before querying."""
+
+        return describe_corpus_tool(corpus_path=corpus_path, page_limit=page_limit, object_limit=object_limit)
+
+    @server.tool()
+    def search_objects(
+        corpus_path: str,
+        query: str,
+        object_type: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Search extracted objects inside a MARE corpus using lightweight lexical matching over evidence objects."""
+
+        return search_objects_tool(corpus_path=corpus_path, query=query, object_type=object_type, limit=limit)
+
     return server
 
 
@@ -140,9 +177,11 @@ def main() -> None:
 
 __all__ = [
     "create_mcp_server",
+    "describe_corpus_tool",
     "ingest_pdf_tool",
     "main",
     "page_objects_tool",
     "query_corpus_tool",
     "query_pdf_tool",
+    "search_objects_tool",
 ]
