@@ -199,6 +199,7 @@ def _render_candidate(st, hit, rank: int) -> None:
         <div class="mare-card">
           <div class="mare-label">Candidate {rank}</div>
           <div class="mare-value">Page {hit.page}</div>
+          <p class="mare-mini"><strong>Source PDF:</strong> {_source_label(hit)}</p>
           <p class="mare-mini"><strong>Object type:</strong> {hit.object_type or 'page'}</p>
           <p class="mare-mini"><strong>Score:</strong> {hit.score}</p>
           <p class="mare-mini"><strong>Reason:</strong> {hit.reason}</p>
@@ -262,9 +263,17 @@ def _selected_option_payload(options: dict[str, dict], label: str) -> dict:
     return options[label]
 
 
-def _build_run_signature(uploaded_filename: str, query: str, top_k: int, stack_controls: dict) -> dict[str, object]:
+def _source_label(hit) -> str:
+    source = hit.metadata.get("source", "") if hit.metadata else ""
+    if source:
+        return Path(source).name
+    return hit.title
+
+
+def _build_run_signature(uploaded_filenames: list[str], query: str, top_k: int, stack_controls: dict) -> dict[str, object]:
     return {
-        "filename": uploaded_filename,
+        "filenames": sorted(uploaded_filenames),
+        "file_count": len(uploaded_filenames),
         "query": query.strip(),
         "top_k": top_k,
         "mode": stack_controls["mode"],
@@ -304,7 +313,7 @@ def _render_stack_summary(st, stack: dict) -> None:
 
 
 def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
-    from mare.api import load_pdf
+    from mare.api import MAREApp, load_pdf
     from mare.extensions import (
         FAISSRetriever,
         FastEmbedReranker,
@@ -338,8 +347,14 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
 
     config = MAREConfig(retriever_factories=retriever_factories, reranker=reranker)
 
-    def _loader(pdf_path: Path, reuse: bool):
-        return load_pdf(pdf_path=pdf_path, reuse=reuse, parser=parser_key, config=config)
+    def _loader(pdf_paths: list[Path], reuse: bool):
+        apps = [load_pdf(pdf_path=pdf_path, reuse=reuse, parser=parser_key, config=config) for pdf_path in pdf_paths]
+        if len(apps) == 1:
+            return apps[0]
+        corpus_paths = [app.corpus_path for app in apps if app.corpus_path is not None]
+        multi_app = MAREApp.from_corpora(corpus_paths, config=config)
+        multi_app.source_pdfs = [pdf_path for pdf_path in pdf_paths]
+        return multi_app
 
     def _maybe_index(app):
         if retriever_key != "qdrant" or not qdrant_index_before_query:
@@ -400,8 +415,12 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
 
     temp_dir = Path(tempfile.gettempdir()) / "mare_streamlit"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = temp_dir / uploaded_pdf.name
-    pdf_path.write_bytes(uploaded_pdf.getvalue())
+    uploaded_pdfs = uploaded_pdf if isinstance(uploaded_pdf, list) else [uploaded_pdf]
+    pdf_paths: list[Path] = []
+    for item in uploaded_pdfs:
+        pdf_path = temp_dir / item.name
+        pdf_path.write_bytes(item.getvalue())
+        pdf_paths.append(pdf_path)
 
     parser_key = stack_controls["parser"]["value"]
     retriever_key = stack_controls["retriever"]["value"]
@@ -419,7 +438,7 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
 
     try:
         with st.spinner("Ingesting PDF and retrieving best pages..."):
-            app = loader(pdf_path=pdf_path, reuse=stack_controls["reuse_corpus"])
+            app = loader(pdf_paths=pdf_paths, reuse=stack_controls["reuse_corpus"])
             indexing_summary = maybe_index(app)
             corpus_path = app.corpus_path
             explanation = app.explain(query=query, top_k=top_k)
@@ -436,12 +455,13 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
         "summary": (
             f"This run used the {next(label for label, meta in PARSER_OPTIONS.items() if meta['value'] == parser_key)} parser, "
             f"{next(label for label, meta in RETRIEVER_OPTIONS.items() if meta['value'] == retriever_key)} retrieval, "
-            f"and {next(label for label, meta in RERANKER_OPTIONS.items() if meta['value'] == reranker_key)} reranking."
+            f"and {next(label for label, meta in RERANKER_OPTIONS.items() if meta['value'] == reranker_key)} reranking "
+            f"across {len(pdf_paths)} PDF{'s' if len(pdf_paths) != 1 else ''}."
         ),
         "indexing": indexing_summary,
     }
     run_signature = _build_run_signature(
-        uploaded_filename=uploaded_pdf.name,
+        uploaded_filenames=[item.name for item in uploaded_pdfs],
         query=query,
         top_k=top_k,
         stack_controls=stack_controls,
@@ -449,9 +469,10 @@ def _run_query(st, uploaded_pdf, query: str, top_k: int, stack_controls: dict):
 
     st.session_state["mare_result"] = {
         "query": query,
-        "corpus_path": str(corpus_path),
+        "corpus_path": str(corpus_path) if corpus_path else "",
+        "corpus_paths": [str(path) for path in app.corpus_paths],
         "explanation": explanation,
-        "filename": uploaded_pdf.name,
+        "filenames": [item.name for item in uploaded_pdfs],
         "app": app,
         "stack": stack_summary,
         "output_preview": output_preview,
@@ -560,7 +581,7 @@ def main() -> None:
         if mode == "Basic":
             st.success("Using the recommended default stack: Builtin PDF + built-in lexical evidence retrieval.")
 
-    uploaded_pdf = st.file_uploader("Upload a PDF", type=["pdf"])
+    uploaded_pdf = st.file_uploader("Upload one or more PDFs", type=["pdf"], accept_multiple_files=True)
     query = st.text_input(
         "Ask a question about the document",
         key="mare_query_input",
@@ -571,8 +592,8 @@ def main() -> None:
     st.caption("Press Enter in the question box or click Ask MARE.")
     submitted = st.button("Ask MARE")
 
-    if uploaded_pdf is None:
-        st.info("Upload a PDF to start. The demo will render pages, retrieve evidence, and show the stack used for the run.")
+    if not uploaded_pdf:
+        st.info("Upload one or more PDFs to start. The demo will render pages, retrieve evidence, and show which document won.")
         return
 
     if submitted or st.session_state.get("mare_submit_via_enter"):
@@ -581,7 +602,7 @@ def main() -> None:
 
     result = st.session_state.get("mare_result")
     current_signature = _build_run_signature(
-        uploaded_filename=uploaded_pdf.name,
+        uploaded_filenames=[item.name for item in uploaded_pdf],
         query=query,
         top_k=top_k,
         stack_controls=stack_controls,
@@ -611,7 +632,7 @@ def main() -> None:
             f"""
             <div class="mare-card">
               <div class="mare-label">Uploaded file</div>
-              <div class="mare-value">{uploaded_pdf.name}</div>
+              <div class="mare-value">{", ".join(item.name for item in uploaded_pdf[:3])}{' …' if len(uploaded_pdf) > 3 else ''}</div>
               <p class="mare-mini" style="margin-top:0.8rem;">
                 Ask a question to see the best matching page, the exact snippet, the highlighted evidence image, and the structured stack/output MARE would expose to code or agents.
               </p>
@@ -635,8 +656,8 @@ def main() -> None:
           <div class="mare-label">Current question</div>
           <div class="mare-value">{result["query"]}</div>
           <p class="mare-mini" style="margin-top:0.6rem;">
-            File: {result["filename"]} <br/>
-            Corpus: {result["corpus_path"]}
+            PDFs: {", ".join(result["filenames"][:3])}{' …' if len(result["filenames"]) > 3 else ''} <br/>
+            Corpora: {len(result.get("corpus_paths") or ([result["corpus_path"]] if result["corpus_path"] else []))}
           </p>
         </div>
         """,
@@ -649,7 +670,7 @@ def main() -> None:
     with metric_cols[1]:
         _render_metric_card(st, "Intent", explanation.plan.intent.replace("_", " "))
     with metric_cols[2]:
-        _render_metric_card(st, "Modality", ", ".join(item.value for item in explanation.plan.selected_modalities))
+        _render_metric_card(st, "Source PDF", _source_label(best))
     with metric_cols[3]:
         _render_metric_card(st, "Object", best.object_type or "page")
 
@@ -657,6 +678,7 @@ def main() -> None:
 
     with left:
         st.subheader("Answer Evidence")
+        st.markdown(f"**Source PDF:** {_source_label(best)}")
         st.markdown(f"**Best page:** {best.page}")
         st.markdown(f"**Score:** {best.score}")
         st.markdown(f"**Object type:** {best.object_type or 'page'}")

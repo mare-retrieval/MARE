@@ -18,9 +18,9 @@ def _stack_controls(**overrides):
 
 
 def test_run_signature_changes_when_stack_changes() -> None:
-    baseline = _build_run_signature("manual.pdf", "how do I connect the AC adapter", 3, _stack_controls())
+    baseline = _build_run_signature(["manual.pdf"], "how do I connect the AC adapter", 3, _stack_controls())
     changed = _build_run_signature(
-        "manual.pdf",
+        ["manual.pdf"],
         "how do I connect the AC adapter",
         3,
         _stack_controls(retriever={"value": "sentence-transformers"}),
@@ -30,10 +30,17 @@ def test_run_signature_changes_when_stack_changes() -> None:
 
 
 def test_result_matches_signature_only_for_current_inputs() -> None:
-    signature = _build_run_signature("manual.pdf", "configure wake on lan", 2, _stack_controls())
+    signature = _build_run_signature(["manual.pdf"], "configure wake on lan", 2, _stack_controls())
     result = {"run_signature": signature}
 
     assert _result_matches_signature(result, signature) is True
 
-    different_signature = _build_run_signature("manual.pdf", "configure wake on lan", 4, _stack_controls())
+    different_signature = _build_run_signature(["manual.pdf"], "configure wake on lan", 4, _stack_controls())
     assert _result_matches_signature(result, different_signature) is False
+
+
+def test_run_signature_changes_when_uploaded_file_set_changes() -> None:
+    baseline = _build_run_signature(["manual-a.pdf"], "where is wake on lan discussed", 3, _stack_controls())
+    changed = _build_run_signature(["manual-a.pdf", "manual-b.pdf"], "where is wake on lan discussed", 3, _stack_controls())
+
+    assert baseline != changed
