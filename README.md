@@ -646,6 +646,12 @@ The tool returns structured evidence with page, snippet, highlight path, and met
 
 If you want agents outside Python to call MARE as a reusable tool layer, MARE now includes a first MCP server surface.
 
+Which interface should you use?
+
+- `mare-ui`: best for human evaluation, demos, and visual proof inspection
+- `mare-workflow`: best for enterprise evaluation, backend prototyping, and agent-style structured output from a terminal
+- `mare-mcp`: best when you already have an MCP-capable client or agent platform and want MARE as a tool server
+
 Install:
 
 ```bash
@@ -659,6 +665,21 @@ mare-mcp
 ```
 
 Note: `mare-mcp` is a stdio MCP server. It is meant to be launched by an MCP-capable client over stdin/stdout, not interacted with directly in a shell prompt.
+
+If you want a human-friendly local evaluation flow with the same agent-style steps, use:
+
+```bash
+mare-workflow --pdf manual.pdf --query "how do I configure wake on lan"
+```
+
+Or return a structured agent payload:
+
+```bash
+mare-workflow \
+  --pdf manual.pdf \
+  --query "how do I configure wake on lan" \
+  --format json
+```
 
 Or point an MCP-capable client at the included example stdio config:
 
@@ -729,7 +750,7 @@ pip install "mare-retrieval[mcp]"
 Example: run the full agent-style workflow locally against a corpus:
 
 ```bash
-PYTHONPATH=src python3 examples/agent_workflow.py \
+mare-workflow \
   --corpus generated/manual.json \
   --query "how do I configure wake on lan" \
   --object-query "wake on lan" \
@@ -739,7 +760,7 @@ PYTHONPATH=src python3 examples/agent_workflow.py \
 Example: run multi-PDF retrieval across a corpus set:
 
 ```bash
-PYTHONPATH=src python3 examples/multi_pdf_workflow.py \
+mare-workflow \
   --corpus generated/manual-a.json \
   --corpus generated/manual-b.json \
   --query "where is wake on lan discussed"
