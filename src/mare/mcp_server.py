@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -240,6 +241,12 @@ def main(argv: list[str] | None = None) -> None:
     run = getattr(server, "run", None)
     if run is None:
         raise RuntimeError("The installed MCP package does not expose `FastMCP.run()`. Please upgrade `mcp`.")
+    run_signature = inspect.signature(run)
+
+    def invoke_run(**kwargs: Any) -> None:
+        accepted = {name: value for name, value in kwargs.items() if name in run_signature.parameters}
+        run(**accepted)
+
     transport = args.transport
     show_banner = not args.no_banner
     settings = getattr(server, "settings", None)
@@ -250,12 +257,12 @@ def main(argv: list[str] | None = None) -> None:
         settings.sse_path = args.sse_path.rstrip("/") or "/sse"
         settings.message_path = args.message_path if args.message_path.endswith("/") else f"{args.message_path}/"
     if transport == "stdio":
-        run(transport="stdio", show_banner=show_banner)
+        invoke_run(transport="stdio", show_banner=show_banner)
         return
     if transport in ("http", "streamable-http"):
-        run(transport="streamable-http", show_banner=show_banner)
+        invoke_run(transport="streamable-http", show_banner=show_banner)
         return
-    run(transport="sse", show_banner=show_banner)
+    invoke_run(transport="sse", show_banner=show_banner)
 
 
 __all__ = [

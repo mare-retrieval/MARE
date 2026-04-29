@@ -216,8 +216,8 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
                 },
             )()
 
-        def run(self, **kwargs) -> None:
-            self.calls.append(kwargs)
+        def run(self, transport, mount_path=None) -> None:
+            self.calls.append({"transport": transport, "mount_path": mount_path})
 
     fake_server = _FakeServer()
     monkeypatch.setattr("sys.stdin", _TTY())
@@ -229,7 +229,7 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
     assert fake_server.calls == [
         {
             "transport": "streamable-http",
-            "show_banner": True,
+            "mount_path": None,
         }
     ]
     assert fake_server.settings.host == "0.0.0.0"
