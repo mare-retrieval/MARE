@@ -31,18 +31,56 @@ from .integrations import (
     hit_to_langchain_document,
     hit_to_llamaindex_node,
 )
-from .mcp_server import (
-    create_mcp_server,
-    describe_corpus_tool,
-    ingest_pdf_tool,
-    page_objects_tool,
-    query_corpora_tool,
-    query_corpus_tool,
-    query_pdf_tool,
-    search_objects_tool,
-)
 from .router import HeuristicModalityRouter
 from .types import Document, Modality, QueryPlan, RetrievalExplanation, RetrievalHit
+
+
+def create_mcp_server():
+    from .mcp_server import create_mcp_server as _create_mcp_server
+
+    return _create_mcp_server()
+
+
+def describe_corpus_tool(*args, **kwargs):
+    from .mcp_server import describe_corpus_tool as _describe_corpus_tool
+
+    return _describe_corpus_tool(*args, **kwargs)
+
+
+def ingest_pdf_tool(*args, **kwargs):
+    from .mcp_server import ingest_pdf_tool as _ingest_pdf_tool
+
+    return _ingest_pdf_tool(*args, **kwargs)
+
+
+def page_objects_tool(*args, **kwargs):
+    from .mcp_server import page_objects_tool as _page_objects_tool
+
+    return _page_objects_tool(*args, **kwargs)
+
+
+def query_corpora_tool(*args, **kwargs):
+    from .mcp_server import query_corpora_tool as _query_corpora_tool
+
+    return _query_corpora_tool(*args, **kwargs)
+
+
+def query_corpus_tool(*args, **kwargs):
+    from .mcp_server import query_corpus_tool as _query_corpus_tool
+
+    return _query_corpus_tool(*args, **kwargs)
+
+
+def query_pdf_tool(*args, **kwargs):
+    from .mcp_server import query_pdf_tool as _query_pdf_tool
+
+    return _query_pdf_tool(*args, **kwargs)
+
+
+def search_objects_tool(*args, **kwargs):
+    from .mcp_server import search_objects_tool as _search_objects_tool
+
+    return _search_objects_tool(*args, **kwargs)
 
 __all__ = [
     "BuiltinPDFParser",

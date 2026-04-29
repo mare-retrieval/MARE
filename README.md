@@ -658,6 +658,8 @@ Run:
 mare-mcp
 ```
 
+Note: `mare-mcp` is a stdio MCP server. It is meant to be launched by an MCP-capable client over stdin/stdout, not interacted with directly in a shell prompt.
+
 Or point an MCP-capable client at the included example stdio config:
 
 ```json

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +188,13 @@ def create_mcp_server():
 
 
 def main() -> None:
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        raise SystemExit(
+            "mare-mcp is a stdio MCP server, so it should be launched by an MCP-capable client rather than run "
+            "interactively in a shell.\n\n"
+            "Use the example client config in examples/mcp_stdio_config.json, or run MARE directly through the "
+            "Python API / workflow examples if you want a human-facing CLI."
+        )
     server = create_mcp_server()
     run = getattr(server, "run", None)
     if run is None:

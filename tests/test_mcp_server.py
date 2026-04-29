@@ -5,6 +5,7 @@ from pathlib import Path
 from mare.mcp_server import (
     describe_corpus_tool,
     ingest_pdf_tool,
+    main,
     page_objects_tool,
     query_corpora_tool,
     query_corpus_tool,
@@ -173,3 +174,22 @@ def test_search_objects_tool_returns_matching_objects(monkeypatch) -> None:
     assert payload["query"] == "ac adapter"
     assert payload["results"][0]["object_type"] == "procedure"
     assert payload["results"][0]["score"] > 0
+
+
+def test_main_exits_with_helpful_message_when_run_interactively(monkeypatch) -> None:
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", _TTY())
+    monkeypatch.setattr("sys.stdout", _TTY())
+
+    try:
+        main()
+    except SystemExit as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected main() to exit when launched interactively.")
+
+    assert "stdio MCP server" in message
+    assert "examples/mcp_stdio_config.json" in message
