@@ -5,11 +5,13 @@ from pathlib import Path
 from mare.mcp_server import (
     describe_corpus_tool,
     ingest_pdf_tool,
+    ingest_pdf_url_tool,
     main,
     page_objects_tool,
     query_corpora_tool,
     query_corpus_tool,
     query_pdf_tool,
+    query_pdf_url_tool,
     search_objects_tool,
 )
 from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
@@ -127,6 +129,30 @@ def test_query_pdf_tool_returns_evidence_payload(monkeypatch) -> None:
     assert payload["query"] == "connect the adapter"
     assert payload["results"][0]["object_type"] == "procedure"
     assert payload["results"][0]["highlight_image_path"].endswith("highlight-10.png")
+
+
+def test_ingest_pdf_url_tool_downloads_then_ingests(monkeypatch, tmp_path: Path) -> None:
+    download_target = tmp_path / "downloaded.pdf"
+    monkeypatch.setattr("mare.mcp_server._download_pdf_url", lambda **kwargs: download_target)
+    monkeypatch.setattr("mare.mcp_server.load_pdf", lambda **kwargs: _FakeApp())
+
+    payload = ingest_pdf_url_tool("https://example.com/manual.pdf", parser="builtin")
+
+    assert payload["pdf_url"] == "https://example.com/manual.pdf"
+    assert payload["download_path"] == str(download_target)
+    assert payload["document_count"] == 1
+
+
+def test_query_pdf_url_tool_downloads_then_queries(monkeypatch, tmp_path: Path) -> None:
+    download_target = tmp_path / "downloaded.pdf"
+    monkeypatch.setattr("mare.mcp_server._download_pdf_url", lambda **kwargs: download_target)
+    monkeypatch.setattr("mare.mcp_server.load_pdf", lambda **kwargs: _FakeApp())
+
+    payload = query_pdf_url_tool("https://example.com/manual.pdf", "connect the adapter", top_k=1)
+
+    assert payload["pdf_url"] == "https://example.com/manual.pdf"
+    assert payload["download_path"] == str(download_target)
+    assert payload["results"][0]["page"] == 10
 
 
 def test_query_corpus_tool_returns_evidence_payload(monkeypatch) -> None:

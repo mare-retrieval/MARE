@@ -719,7 +719,9 @@ http://your-host:8000/mcp/
 The MCP server exposes focused tools for the evidence layer:
 
 - `ingest_pdf`
+- `ingest_pdf_url`
 - `query_pdf`
+- `query_pdf_url`
 - `query_corpus`
 - `query_corpora`
 - `page_objects`
@@ -755,6 +757,7 @@ pip install "mare-retrieval[mcp]"
 3. Have your agent call:
    - `describe_corpus` first when it needs to understand what pages, signals, and object types exist in the PDF
    - `query_pdf` when it has a PDF path and needs grounded evidence directly
+   - `query_pdf_url` when the PDF is reachable by URL but not on the same filesystem as the MARE server
    - `query_corpus` when the PDF was already ingested and you want faster repeated retrieval
    - `query_corpora` when the agent needs to search across a set of PDFs and still get page/snippet/highlight proof back
    - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables on one page
@@ -766,6 +769,13 @@ pip install "mare-retrieval[mcp]"
    - `highlight_image_path`
    - `object_type`
    - `reason`
+
+When connecting MARE to remote app platforms such as ChatGPT Create App, prefer:
+
+- `query_pdf_url` for files the platform can expose as public or signed URLs
+- `query_corpus` / `query_corpora` for corpora already generated on the MARE server
+
+Avoid plain `query_pdf` in those cases unless the PDF path is on the same filesystem as the running MARE server.
 
 Example: run the full agent-style workflow locally against a corpus:
 

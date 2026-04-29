@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 from mare.api import load_corpora, load_corpus, load_pdf
 from mare.integrations import hits_to_evidence_payload
+
+
+def _safe_download_dir() -> Path:
+    path = Path("generated") / "downloads"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
+    parsed = urllib.parse.urlparse(pdf_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("pdf_url must use http or https.")
+
+    if download_path:
+        target = Path(download_path)
+    else:
+        name = Path(parsed.path).name or "downloaded.pdf"
+        if not name.lower().endswith(".pdf"):
+            name = f"{name}.pdf"
+        digest = hashlib.sha1(pdf_url.encode("utf-8")).hexdigest()[:10]
+        stem = Path(name).stem or "downloaded"
+        target = _safe_download_dir() / f"{stem}-{digest}.pdf"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(pdf_url) as response:
+        payload = response.read()
+    target.write_bytes(payload)
+    return target
 
 
 def ingest_pdf_tool(
@@ -45,6 +76,46 @@ def query_pdf_tool(
             "parser": parser,
         }
     )
+    return payload
+
+
+def ingest_pdf_url_tool(
+    pdf_url: str,
+    output_path: str | None = None,
+    download_path: str | None = None,
+    reuse: bool = False,
+    parser: str = "builtin",
+) -> dict[str, Any]:
+    local_pdf = _download_pdf_url(pdf_url=pdf_url, download_path=download_path)
+    payload = ingest_pdf_tool(
+        pdf_path=str(local_pdf),
+        output_path=output_path,
+        reuse=reuse,
+        parser=parser,
+    )
+    payload.update({"pdf_url": pdf_url, "download_path": str(local_pdf)})
+    return payload
+
+
+def query_pdf_url_tool(
+    pdf_url: str,
+    query: str,
+    output_path: str | None = None,
+    download_path: str | None = None,
+    reuse: bool = False,
+    parser: str = "builtin",
+    top_k: int = 3,
+) -> dict[str, Any]:
+    local_pdf = _download_pdf_url(pdf_url=pdf_url, download_path=download_path)
+    payload = query_pdf_tool(
+        pdf_path=str(local_pdf),
+        query=query,
+        output_path=output_path,
+        reuse=reuse,
+        parser=parser,
+        top_k=top_k,
+    )
+    payload.update({"pdf_url": pdf_url, "download_path": str(local_pdf)})
     return payload
 
 
@@ -146,6 +217,46 @@ def create_mcp_server():
             pdf_path=pdf_path,
             query=query,
             output_path=output_path,
+            reuse=reuse,
+            parser=parser,
+            top_k=top_k,
+        )
+
+    @server.tool()
+    def ingest_pdf_url(
+        pdf_url: str,
+        output_path: str | None = None,
+        download_path: str | None = None,
+        reuse: bool = False,
+        parser: str = "builtin",
+    ) -> dict[str, Any]:
+        """Download a PDF from an HTTP(S) URL, ingest it into a MARE corpus, and return the generated corpus path."""
+
+        return ingest_pdf_url_tool(
+            pdf_url=pdf_url,
+            output_path=output_path,
+            download_path=download_path,
+            reuse=reuse,
+            parser=parser,
+        )
+
+    @server.tool()
+    def query_pdf_url(
+        pdf_url: str,
+        query: str,
+        output_path: str | None = None,
+        download_path: str | None = None,
+        reuse: bool = False,
+        parser: str = "builtin",
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Download a PDF from an HTTP(S) URL, then return grounded evidence with page, snippet, highlight, and metadata."""
+
+        return query_pdf_url_tool(
+            pdf_url=pdf_url,
+            query=query,
+            output_path=output_path,
+            download_path=download_path,
             reuse=reuse,
             parser=parser,
             top_k=top_k,
@@ -296,10 +407,12 @@ __all__ = [
     "create_mcp_server",
     "describe_corpus_tool",
     "ingest_pdf_tool",
+    "ingest_pdf_url_tool",
     "main",
     "page_objects_tool",
     "query_corpora_tool",
     "query_corpus_tool",
     "query_pdf_tool",
+    "query_pdf_url_tool",
     "search_objects_tool",
 ]
