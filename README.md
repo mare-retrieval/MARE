@@ -22,6 +22,55 @@ The bigger goal is simple:
 
 MARE is meant to sit underneath agent logic and application logic as the PDF evidence layer.
 
+## Start here
+
+If you are new to MARE, use this order:
+
+1. `mare-workflow`
+   - fastest way to see what MARE returns for a real PDF
+   - best for terminal users, backend teams, and enterprise evaluation
+2. Streamlit playground
+   - best for visual proof, screenshots, and product demos
+3. `mare-mcp`
+   - best when you want another client, agent, or app platform to call MARE as a tool
+
+### First 3 minutes
+
+Install from PyPI:
+
+```bash
+pip install mare-retrieval
+```
+
+Ask a PDF a question:
+
+```bash
+mare-ask manual.pdf "how do I connect the AC adapter"
+```
+
+Run the fuller agent-style workflow:
+
+```bash
+mare-workflow --pdf manual.pdf --query "how do I connect the AC adapter"
+```
+
+That should already show the core product value:
+
+- best page
+- exact snippet
+- highlight path
+- evidence object type
+- retrieval reason
+
+### Which interface should I use?
+
+| Interface | Best for | What you get |
+| --- | --- | --- |
+| `mare-ask` | fastest first test | best page, snippet, image paths |
+| `mare-workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
+| Streamlit | visual exploration | upload PDFs, inspect highlights, compare results |
+| `mare-mcp` | integrations | tool server for MCP-capable clients and app platforms |
+
 It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence that agents and developers can build on.
 
 Paper inspiration: https://arxiv.org/pdf/2602.17687
@@ -122,7 +171,7 @@ tests/
 
 ## Quickstart
 
-Clone and install:
+Clone and install for development:
 
 ```bash
 git clone https://github.com/mare-retrieval/MARE.git
@@ -138,10 +187,22 @@ Or install directly from GitHub:
 pip install "git+https://github.com/mare-retrieval/MARE.git"
 ```
 
-The intended package install after PyPI release is:
+Install from PyPI:
 
 ```bash
 pip install mare-retrieval
+```
+
+Recommended first command:
+
+```bash
+mare-ask manual.pdf "how do I connect the AC adapter"
+```
+
+Recommended next command:
+
+```bash
+mare-workflow --pdf manual.pdf --query "how do I connect the AC adapter"
 ```
 
 What each install path gives you:
@@ -236,7 +297,7 @@ jupyter notebook examples/developer_playground.ipynb
 Use one command:
 
 ```bash
-python3 ask.py "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
+mare-ask "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
 ```
 
 That will:
@@ -250,14 +311,20 @@ That will:
 If you want to reuse a previously generated corpus:
 
 ```bash
-python3 ask.py --reuse "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
+mare-ask --reuse "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" "partially reinstall the set screws if they fall out"
+```
+
+If you want a more complete picture, including corpus summary and object search, use:
+
+```bash
+mare-workflow --pdf "MacBook Pro (14-inch, M5 Pro or M5 Max) MagSafe 3 Board - Apple Support.pdf" --query "partially reinstall the set screws if they fall out"
 ```
 
 If the PDF filename is awkward, rename it first:
 
 ```bash
 mv ./*.pdf ./manual.pdf
-PYTHONPATH=src python3 ask.py ./manual.pdf "partially reinstall the set screws if they fall out"
+mare-ask ./manual.pdf "partially reinstall the set screws if they fall out"
 ```
 
 ## Benchmarking real corpora

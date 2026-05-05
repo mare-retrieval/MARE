@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mare-retrieval"
 version = "0.4.1"
-description = "Evidence-first PDF retrieval library for developers and agents that returns the best page, exact snippet, highlight, and visual proof."
+description = "Evidence-first PDF retrieval layer for developers and agents that returns the best page, exact snippet, highlight, and visual proof."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
