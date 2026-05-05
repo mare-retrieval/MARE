@@ -26,11 +26,12 @@ MARE is meant to sit underneath agent logic and application logic as the PDF evi
 
 If you are new to MARE, use this order:
 
-1. `mare-workflow`
-   - fastest way to see what MARE returns for a real PDF
-   - best for terminal users, backend teams, and enterprise evaluation
-2. Streamlit playground
+1. `mare-ui`
    - best for visual proof, screenshots, and product demos
+   - easiest way to understand MARE in seconds
+2. `mare-workflow`
+   - fastest way to see what MARE returns in a terminal
+   - best for backend teams and enterprise evaluation
 3. `mare-mcp`
    - best when you want another client, agent, or app platform to call MARE as a tool
 
@@ -40,6 +41,24 @@ Install from PyPI:
 
 ```bash
 pip install mare-retrieval
+```
+
+Install the UI extra if you want the visual playground:
+
+```bash
+pip install "mare-retrieval[ui]"
+```
+
+Launch the UI:
+
+```bash
+mare-ui
+```
+
+Then open:
+
+```text
+http://localhost:8501
 ```
 
 Ask a PDF a question:
@@ -62,13 +81,27 @@ That should already show the core product value:
 - evidence object type
 - retrieval reason
 
+### Where generated files go
+
+When MARE ingests a PDF, it typically writes:
+
+- corpus JSON: `generated/<pdf-name>.json`
+- rendered page images: `generated/<pdf-name>/page-*.png`
+- highlight images: `generated/<pdf-name>/highlights/*.png`
+
+You can see those paths directly in:
+
+- `mare-ask`
+- `mare-workflow`
+- the Streamlit playground (`mare-ui`)
+
 ### Which interface should I use?
 
 | Interface | Best for | What you get |
 | --- | --- | --- |
 | `mare-ask` | fastest first test | best page, snippet, image paths |
 | `mare-workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
-| Streamlit | visual exploration | upload PDFs, inspect highlights, compare results |
+| `mare-ui` | visual exploration | upload PDFs, inspect highlights, compare results |
 | `mare-mcp` | integrations | tool server for MCP-capable clients and app platforms |
 
 It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local PDF retrieval with visible evidence that agents and developers can build on.
@@ -191,6 +224,13 @@ Install from PyPI:
 
 ```bash
 pip install mare-retrieval
+```
+
+Install the visual playground:
+
+```bash
+pip install "mare-retrieval[ui]"
+mare-ui
 ```
 
 Recommended first command:

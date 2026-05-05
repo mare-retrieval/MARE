@@ -53,7 +53,7 @@ setup(
             "mare-ingest=mare.ingest:main",
             "mare-ask=mare.ask:main",
             "mare-workflow=mare.workflow:main",
-            "mare-ui=mare.streamlit_app:main",
+            "mare-ui=mare.ui:main",
             "mare-mcp=mare.mcp_server:main",
         ]
     },
