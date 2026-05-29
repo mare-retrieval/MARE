@@ -4,11 +4,14 @@ import json
 from pathlib import Path
 
 from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
+from mare.extensions import MAREConfig
 from mare.workflow import (
     _build_workflow_payload,
     _default_output_path,
     _discover_folder_inputs,
     _load_app,
+    _print_findings,
+    _print_review,
     _print_pretty,
     build_history_store,
 )
@@ -23,6 +26,10 @@ class _FakeApp:
         self.source_pdf = Path("manual.pdf")
         self.source_pdfs = [self.source_pdf]
         self.documents = [object()]
+        self.config = MAREConfig(
+            retriever_label="Hybrid semantic + lexical",
+            retriever_resolution_note="Defaulted to Hybrid semantic + lexical retrieval because sentence-transformers is available.",
+        )
 
     def describe_corpus(self, page_limit: int = 3, object_limit: int = 5):
         return {
@@ -164,6 +171,10 @@ def test_build_workflow_payload_returns_agent_shape() -> None:
     assert payload["steps"]["query_corpus"]["comparison"][0]["citation"] == "manual.pdf | page 10"
     assert payload["steps"]["query_corpus"]["comparison"][1]["citation"] == "guide.docx | page 12"
     assert payload["steps"]["query_corpus"]["summary"]["overview"] == "Found 2 grounded results across 2 sources."
+    assert payload["steps"]["query_corpus"]["findings"]["actions"]["item_count"] == 2
+    assert payload["steps"]["query_corpus"]["review"]["best_evidence"]["citation"] == "manual.pdf | page 10"
+    assert payload["steps"]["query_corpus"]["retriever"]["label"] == "Hybrid semantic + lexical"
+    assert payload["steps"]["query_corpus"]["support"]["status"] == "strong"
 
 
 def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
@@ -183,11 +194,52 @@ def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
     assert "MARE Agent Workflow" in output
     assert "Documents: manual.md" in output
     assert "Grounded Retrieval" in output
+    assert "Retriever: Hybrid semantic + lexical" in output
+    assert "Support: Strong support" in output
     assert "Summary: Found 2 grounded results across 2 sources." in output
     assert "Citation: manual.pdf | page 10" in output
     assert "Highlight:" in output
     assert "Comparison View" in output
     assert "2. guide.docx | page 12 | procedure | score=0.720" in output
+
+
+def test_print_findings_shows_actions_view(capsys) -> None:
+    payload = _build_workflow_payload(
+        _FakeApp(),
+        query="connect the adapter",
+        object_query="adapter",
+        object_type="procedure",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+
+    _print_findings(payload, "actions")
+    output = capsys.readouterr().out
+
+    assert "Actions query: connect the adapter" in output
+    assert "Found 2 grounded actions." in output
+    assert "Citation: manual.pdf | page 10" in output
+
+
+def test_print_review_shows_review_view(capsys) -> None:
+    payload = _build_workflow_payload(
+        _FakeApp(),
+        query="connect the adapter",
+        object_query="adapter",
+        object_type="procedure",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+
+    _print_review(payload)
+    output = capsys.readouterr().out
+
+    assert "Review query: connect the adapter" in output
+    assert "Grounded review assembled from the best supporting evidence." in output
+    assert "Primary citation: manual.pdf | page 10" in output
+    assert "Findings: actions=2, requirements=0, risks=0, deadlines=1" in output
 
 
 def test_workflow_history_store_persists_runs(tmp_path: Path) -> None:

@@ -8,9 +8,14 @@ def main() -> None:
     if not args or args[0] in {"-h", "--help", "help"}:
         print("MARE")
         print("")
-        print("One product, multiple modes:")
+        print("Grounded answers over documents and folders, with proof.")
+        print("")
+        print("Start here:")
+        print("  mare start         See the fastest first-run path for your documents")
+        print("")
+        print("Product modes:")
         print("  mare ui            Launch the visual playground")
-        print("  mare chat          Ask questions over a folder of PDFs")
+        print("  mare chat          Ask questions over a folder of mixed documents")
         print("  mare ask           Ask one PDF a question")
         print("  mare workflow      Run the structured evidence workflow")
         print("  mare ingest        Ingest a PDF into a MARE corpus")
@@ -18,6 +23,8 @@ def main() -> None:
         print("  mare mcp           Run the MCP server")
         print("")
         print("Examples")
+        print("  mare start")
+        print("  mare start ./examples/mixed_docs")
         print("  mare ui")
         print("  mare chat --folder ./docs")
         print('  mare ask manual.pdf "how do I connect the AC adapter"')
@@ -26,6 +33,7 @@ def main() -> None:
 
     command, *rest = args
     dispatch = {
+        "start": "mare.start",
         "ui": "mare.ui",
         "chat": "mare.chat",
         "ask": "mare.ask",

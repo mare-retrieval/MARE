@@ -26,6 +26,9 @@ from .extensions import (
 )
 from .fusion import WeightedScoreFusion
 from .integrations import (
+    build_all_grounded_findings_payload,
+    build_grounded_findings_payload,
+    build_grounded_review_payload,
     create_langchain_tool,
     create_langgraph_tool,
     create_langchain_retriever,
@@ -103,6 +106,9 @@ __all__ = [
     "BuiltinPDFParser",
     "BuiltinDocxParser",
     "BuiltinTextParser",
+    "build_all_grounded_findings_payload",
+    "build_grounded_findings_payload",
+    "build_grounded_review_payload",
     "build_grounded_summary_payload",
     "create_langchain_tool",
     "create_langgraph_tool",

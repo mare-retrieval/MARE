@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mare.api import MAREApp, load_corpora, load_corpus, load_document
-from mare.integrations import build_grounded_summary_payload, format_evidence_citation
+from mare.integrations import build_all_grounded_findings_payload, build_grounded_review_payload, build_grounded_summary_payload, format_evidence_citation
 
 
 _SKIP_DIR_NAMES = {
@@ -151,6 +151,52 @@ def _default_output_path(source_path: Path) -> Path:
     return Path("generated") / f"{source_path.stem}.json"
 
 
+def _resolved_retriever_label(app: MAREApp) -> str:
+    label = getattr(app.config, "retriever_label", "") if getattr(app, "config", None) else ""
+    return label or "Built-in lexical"
+
+
+def _retriever_resolution_note(app: MAREApp) -> str:
+    note = getattr(app.config, "retriever_resolution_note", "") if getattr(app, "config", None) else ""
+    return note or ""
+
+
+def _build_support_assessment(explanation) -> dict[str, str | float | None]:
+    if not explanation.fused_results:
+        return {
+            "status": "none",
+            "label": "No support",
+            "message": "No grounded evidence was found for this query.",
+            "best_score": None,
+            "plan_confidence": explanation.plan.confidence,
+        }
+
+    best = explanation.fused_results[0]
+    best_score = float(best.score)
+    plan_confidence = float(explanation.plan.confidence)
+
+    if best_score >= 0.85 and plan_confidence >= 0.7:
+        status = "strong"
+        label = "Strong support"
+        message = "Grounded evidence looks strong for this answer."
+    elif best_score >= 0.65 and plan_confidence >= 0.55:
+        status = "moderate"
+        label = "Moderate support"
+        message = "Grounded evidence is useful, but you may want to inspect the proof directly."
+    else:
+        status = "weak"
+        label = "Weak support"
+        message = "Evidence is weak or ambiguous. Inspect the proof carefully or refine the question."
+
+    return {
+        "status": status,
+        "label": label,
+        "message": message,
+        "best_score": best_score,
+        "plan_confidence": plan_confidence,
+    }
+
+
 def _load_app(
     *,
     documents: list[str],
@@ -208,6 +254,7 @@ def _build_workflow_payload(
     summary = app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
     browsed_objects = app.search_objects(query=object_query, object_type=object_type, limit=object_limit)
     explanation = app.explain(query, top_k=top_k)
+    support = _build_support_assessment(explanation)
     retrieval_results = [
         {
             "doc_id": hit.doc_id,
@@ -225,6 +272,17 @@ def _build_workflow_payload(
         }
         for hit in explanation.fused_results
     ]
+    comparison = _build_comparison_view(retrieval_results)
+    grounded_summary = build_grounded_summary_payload(retrieval_results)
+    findings = build_all_grounded_findings_payload(retrieval_results)
+    review = build_grounded_review_payload(
+        retrieval_results,
+        comparison=comparison,
+        summary=grounded_summary,
+        findings=findings,
+        support=support,
+    )
+
     return {
         "workflow": "agent-evidence",
         "source": {
@@ -245,6 +303,10 @@ def _build_workflow_payload(
             },
             "query_corpus": {
                 "query": query,
+                "retriever": {
+                    "label": _resolved_retriever_label(app),
+                    "note": _retriever_resolution_note(app),
+                },
                 "plan": {
                     "intent": explanation.plan.intent,
                     "selected_modalities": [item.value for item in explanation.plan.selected_modalities],
@@ -253,8 +315,11 @@ def _build_workflow_payload(
                     "rationale": explanation.plan.rationale,
                 },
                 "results": retrieval_results,
-                "comparison": _build_comparison_view(retrieval_results),
-                "summary": build_grounded_summary_payload(retrieval_results),
+                "comparison": comparison,
+                "summary": grounded_summary,
+                "findings": findings,
+                "review": review,
+                "support": support,
             },
         },
     }
@@ -329,6 +394,11 @@ def _print_pretty(payload: dict[str, Any]) -> None:
 
     print("Grounded Retrieval")
     print(f"Query: {query_step['query']}")
+    retriever = query_step.get("retriever", {})
+    if retriever.get("label"):
+        print(f"Retriever: {retriever['label']}")
+    if retriever.get("note"):
+        print(f"Retriever note: {retriever['note']}")
     print(f"Intent: {query_step['plan']['intent']}")
     if not results:
         print("Best result: no evidence found")
@@ -336,6 +406,11 @@ def _print_pretty(payload: dict[str, Any]) -> None:
 
     if summary.get("overview"):
         print(f"Summary: {summary['overview']}")
+    support = query_step.get("support", {})
+    if support.get("label"):
+        print(f"Support: {support['label']}")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
 
     best = results[0]
     source_document = best.get("metadata", {}).get("source", "")
@@ -356,6 +431,57 @@ def _print_pretty(payload: dict[str, Any]) -> None:
             print(f"   Source: {item['source_document']}")
             print(f"   Snippet: {item['snippet'] or '[no snippet available]'}")
             print(f"   Reason: {item['reason']}")
+
+
+def _print_findings(payload: dict[str, Any], finding_type: str) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    findings = query_step.get("findings", {}).get(finding_type, {})
+    print(f"{finding_type.title()} query: {query_step['query']}")
+    if not findings.get("items"):
+        print(findings.get("overview") or f"No grounded {finding_type} found.")
+        print("")
+        return
+
+    print(findings.get("overview") or finding_type.title())
+    for index, item in enumerate(findings["items"], start=1):
+        score_label = f"{item['score']:.3f}" if isinstance(item.get("score"), (int, float)) else "n/a"
+        print(f"{index}. {item['snippet']}")
+        print(f"   Citation: {item.get('citation') or '[no citation available]'}")
+        print(f"   Signal: {item.get('signal') or '[no signal]'}")
+        print(f"   Score: {score_label}")
+        if item.get("reason"):
+            print(f"   Reason: {item['reason']}")
+    print("")
+
+
+def _print_review(payload: dict[str, Any]) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    review = query_step.get("review", {})
+    best = review.get("best_evidence", {})
+    print(f"Review query: {query_step['query']}")
+    print(review.get("overview") or "No grounded review available.")
+    support = review.get("support") or {}
+    if support.get("label"):
+        print(f"Support: {support['label']}")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
+    if best.get("citation"):
+        print(f"Primary citation: {best['citation']}")
+    if best.get("snippet"):
+        print(f"Primary snippet: {best['snippet']}")
+    if best.get("reason"):
+        print(f"Primary reason: {best['reason']}")
+    finding_counts = review.get("finding_counts", {})
+    print(
+        "Findings: "
+        + ", ".join(f"{name}={finding_counts.get(name, 0)}" for name in ("actions", "requirements", "risks", "deadlines"))
+    )
+    highlights = review.get("highlights") or []
+    if highlights:
+        print("Highlights")
+        for index, item in enumerate(highlights, start=1):
+            print(f"{index}. {item}")
+    print("")
 
 
 def _default_history_slug(app: MAREApp) -> str:
@@ -434,6 +560,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="pretty",
         help="Output format. Use json for agent-style payloads, pretty for human evaluation.",
     )
+    parser.add_argument(
+        "--task",
+        choices=("answer", "review", "compare", "summary", "actions", "requirements", "risks", "deadlines"),
+        default="answer",
+        help="Optional user-facing task view to print in pretty mode. JSON output always includes the full payload.",
+    )
     parser.add_argument("--history-file", help="Optional JSON file path for saving workflow run history")
     parser.add_argument("--history-name", help="Optional history name used for saved workflow runs")
     parser.add_argument("--no-history", action="store_true", help="Disable saved workflow run history")
@@ -471,6 +603,38 @@ def main() -> None:
         )
     if args.format == "json":
         print(json.dumps(payload, indent=2))
+        return
+    if args.task == "review":
+        _print_review(payload)
+        return
+    if args.task in {"actions", "requirements", "risks", "deadlines"}:
+        _print_findings(payload, args.task)
+        return
+    if args.task == "compare":
+        query_step = payload["steps"]["query_corpus"]
+        print(f"Compare query: {query_step['query']}")
+        comparison = query_step.get("comparison", [])
+        if not comparison:
+            print("Compare: No matching evidence found.")
+            return
+        print("Comparison")
+        for index, item in enumerate(comparison, start=1):
+            score_label = f"{item['score']:.3f}" if isinstance(item.get("score"), (int, float)) else "n/a"
+            print(f"{index}. {item['citation']} | {item['object_type']} | score={score_label}")
+            print(f"   Source: {item['source_document']}")
+            print(f"   Snippet: {item['snippet'] or '[no snippet available]'}")
+            print(f"   Reason: {item['reason']}")
+        return
+    if args.task == "summary":
+        query_step = payload["steps"]["query_corpus"]
+        summary = query_step.get("summary", {})
+        print(f"Summary query: {query_step['query']}")
+        print(summary.get("overview") or "No grounded evidence found.")
+        for index, item in enumerate(summary.get("highlights") or [], start=1):
+            print(f"{index}. {item.get('snippet') or '[no snippet available]'}")
+            print(f"   Citation: {item.get('citation') or '[no citation available]'}")
+            if item.get("reason"):
+                print(f"   Reason: {item['reason']}")
         return
     _print_pretty(payload)
 

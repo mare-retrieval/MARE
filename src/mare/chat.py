@@ -183,16 +183,21 @@ def _print_intro(app: MAREApp) -> None:
         print(f"Loaded documents: {', '.join(source_documents)}")
     if app.corpus_paths:
         print(f"Loaded corpora: {', '.join(str(path) for path in app.corpus_paths)}")
-    print("Type a question, or use :help, :sources, :json <question>, :quit")
+    print("Type a question, or use :help, :review, :sources, :actions, :requirements, :risks, :deadlines, :json <question>, :quit")
     print("")
 
 
 def _print_help() -> None:
     print("Commands")
+    print(":actions .. Extract action items with citations for the rest of the line")
     print(":clear-history Clear saved session history for this chat session")
     print(":compare .. Compare grounded evidence across top matches for the rest of the line")
+    print(":deadlines Extract deadlines and due-date language for the rest of the line")
     print(":help      Show this help")
     print(":history    Show recent saved session history")
+    print(":requirements Extract requirement language with citations for the rest of the line")
+    print(":review .. Assemble a grounded review with answer, support, and findings")
+    print(":risks ... Extract risk, warning, or caution evidence for the rest of the line")
     print(":steps ... Extract procedure-like steps with citations for the rest of the line")
     print(":summary . Summarize grounded evidence across top matches for the rest of the line")
     print(":sources   Show loaded documents and corpora")
@@ -330,11 +335,60 @@ def _print_summary(payload: dict) -> None:
     print("")
 
 
+def _print_findings(payload: dict, finding_type: str) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    findings = query_step.get("findings", {}).get(finding_type, {})
+    print(f"{finding_type.title()} query: {query_step['query']}")
+    if not findings.get("items"):
+        print(findings.get("overview") or f"No grounded {finding_type} found.")
+        print("")
+        return
+
+    print(findings.get("overview") or finding_type.title())
+    for index, item in enumerate(findings["items"], start=1):
+        print(f"{index}. {item.get('snippet') or '[no snippet available]'}")
+        print(f"   Citation: {item.get('citation') or '[no citation available]'}")
+        print(f"   Signal: {item.get('signal') or '[no signal]'}")
+        if item.get("reason"):
+            print(f"   Reason: {item['reason']}")
+    print("")
+
+
+def _print_review(payload: dict) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    review = query_step.get("review", {})
+    best = review.get("best_evidence", {})
+    print(f"Review query: {query_step['query']}")
+    print(review.get("overview") or "No grounded review available.")
+    support = review.get("support") or {}
+    if support.get("label"):
+        print(f"Support: {support['label']}")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
+    if best.get("citation"):
+        print(f"Primary citation: {best['citation']}")
+    if best.get("snippet"):
+        print(f"Primary snippet: {best['snippet']}")
+    finding_counts = review.get("finding_counts", {})
+    print(
+        "Findings: "
+        + ", ".join(f"{name}={finding_counts.get(name, 0)}" for name in ("actions", "requirements", "risks", "deadlines"))
+    )
+    for index, item in enumerate(review.get("highlights") or [], start=1):
+        print(f"{index}. {item}")
+    print("")
+
+
 def _print_answer(payload: dict) -> None:
     query_step = payload["steps"]["query_corpus"]
     plan = query_step["plan"]
     results = query_step["results"]
     print(f"Question: {query_step['query']}")
+    retriever = query_step.get("retriever", {})
+    if retriever.get("label"):
+        print(f"Retriever: {retriever['label']}")
+    if retriever.get("note"):
+        print(f"Retriever note: {retriever['note']}")
     print(f"Intent: {plan['intent']}")
     print(f"Confidence: {_format_score(plan.get('confidence'))}")
     if plan.get("selected_modalities"):
@@ -347,6 +401,7 @@ def _print_answer(payload: dict) -> None:
         return
 
     best = results[0]
+    support = query_step.get("support", {})
     source_document = best.get("metadata", {}).get("source", "")
     print(f"Best page: {best['page']}")
     if source_document:
@@ -360,6 +415,10 @@ def _print_answer(payload: dict) -> None:
     )
     print(f"Object type: {best['object_type'] or 'page'}")
     print(f"Score: {_format_score(best.get('score'))}")
+    if support.get("label"):
+        print(f"Support: {support['label']}")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
     print(f"Snippet: {best['snippet'] or '[no snippet available]'}")
     print(f"Reason: {best['reason']}")
     print(f"Page image: {best['page_image_path'] or '[no page image available]'}")
@@ -472,6 +531,25 @@ def run_chat(
             if session_store is not None:
                 session_store.append(entry_type="summary", query=query, payload=payload)
             continue
+        if raw.startswith(":review"):
+            query = raw[len(":review") :].strip()
+            if not query:
+                print("Usage: :review <question>")
+                print("")
+                continue
+            payload = _build_workflow_payload(
+                app,
+                query=query,
+                object_query=query,
+                object_type=None,
+                top_k=top_k,
+                page_limit=page_limit,
+                object_limit=object_limit,
+            )
+            _print_review(payload)
+            if session_store is not None:
+                session_store.append(entry_type="review", query=query, payload=payload)
+            continue
         if raw.startswith(":steps"):
             query = raw[len(":steps") :].strip()
             if not query:
@@ -502,19 +580,42 @@ def run_chat(
             if session_store is not None:
                 session_store.append(entry_type="json", query=query, payload=payload)
             continue
-
-        payload = _build_workflow_payload(
-            app,
-            query=raw,
-            object_query=raw,
-            object_type=None,
-            top_k=top_k,
-            page_limit=page_limit,
-            object_limit=object_limit,
-        )
-        _print_answer(payload)
-        if session_store is not None:
-            session_store.append(entry_type="ask", query=raw, payload=payload)
+        for command_name in ("actions", "requirements", "risks", "deadlines"):
+            prefix = f":{command_name}"
+            if raw.startswith(prefix):
+                query = raw[len(prefix) :].strip()
+                if not query:
+                    print(f"Usage: {prefix} <question>")
+                    print("")
+                    break
+                payload = _build_workflow_payload(
+                    app,
+                    query=query,
+                    object_query=query,
+                    object_type=None,
+                    top_k=top_k,
+                    page_limit=page_limit,
+                    object_limit=object_limit,
+                )
+                _print_findings(payload, command_name)
+                if session_store is not None:
+                    session_store.append(entry_type=command_name, query=query, payload=payload)
+                break
+        else:
+            payload = _build_workflow_payload(
+                app,
+                query=raw,
+                object_query=raw,
+                object_type=None,
+                top_k=top_k,
+                page_limit=page_limit,
+                object_limit=object_limit,
+            )
+            _print_answer(payload)
+            if session_store is not None:
+                session_store.append(entry_type="ask", query=raw, payload=payload)
+            continue
+        continue
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

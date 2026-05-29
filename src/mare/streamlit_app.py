@@ -37,7 +37,12 @@ PARSER_OPTIONS = {
 }
 
 RETRIEVER_OPTIONS = {
-    "Built-in lexical (Recommended)": {
+    "Smart default (Recommended)": {
+        "value": "smart",
+        "description": "Automatically prefers hybrid semantic retrieval when available and falls back to MARE's built-in evidence retrieval otherwise.",
+        "extra": "core",
+    },
+    "Built-in lexical": {
         "value": "builtin",
         "description": "Uses MARE's strongest default page and object-aware retrieval stack.",
         "extra": "core",
@@ -99,6 +104,12 @@ OUTPUT_OPTIONS = {
         "extra": "mare-retrieval[llamaindex]",
     },
 }
+
+STARTER_PROMPTS = [
+    "how do I connect the AC adapter",
+    "show me the onboarding steps",
+    "compare the setup instructions across these docs",
+]
 
 
 def _ui_session_history_path() -> Path:
@@ -267,6 +278,46 @@ def _render_metric_card(st, label: str, value: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_getting_started(st) -> None:
+    prompt_badges = "".join(f"<span class='mare-badge'>{prompt}</span>" for prompt in STARTER_PROMPTS)
+    st.markdown(
+        f"""
+        <div class="mare-card" style="margin-bottom:1rem;">
+          <div class="mare-label">Start Here</div>
+          <div class="mare-value">Upload documents, then ask one concrete question.</div>
+          <p class="mare-mini" style="margin-top:0.7rem;">
+            MARE works best when you point it at a document or folder and ask for something inspectable:
+            a setup step, a comparison, a summary, or the exact source behind an answer.
+          </p>
+          <p class="mare-mini" style="margin-top:0.7rem;">
+            Recommended sources: PDFs, DOCX, Markdown, and text files. PDFs currently have the strongest visual proof flow.
+          </p>
+          <div style="margin-top:0.6rem;">{prompt_badges}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_upload_empty_state(st) -> None:
+    st.info("Upload one or more documents to start. PDFs, Word docs, Markdown, and text files work best right now.")
+    st.markdown(
+        """
+        <div class="mare-card" style="margin-top:0.8rem;">
+          <div class="mare-label">Best First Run</div>
+          <div class="mare-value">Use a small folder of related documents and ask one concrete question.</div>
+          <p class="mare-mini" style="margin-top:0.7rem;">
+            Good first questions ask for a step, a comparison, or a grounded summary.
+            MARE will return the best citation, snippet, and any available visual proof.
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Starter prompts: " + " | ".join(STARTER_PROMPTS))
+    st.caption("Bundled example in the repo: `examples/mixed_docs`")
 
 
 def _render_candidate(st, hit, rank: int) -> None:
@@ -442,6 +493,73 @@ def _render_grounded_summary(st, summary: dict) -> None:
         )
 
 
+def _render_grounded_findings(st, findings: dict) -> None:
+    st.subheader("Grounded Findings")
+    if not findings:
+        st.caption("No grounded findings are available for this run.")
+        return
+
+    for finding_type in ("actions", "requirements", "risks", "deadlines"):
+        payload = findings.get(finding_type, {})
+        items = payload.get("items") or []
+        label = finding_type.title()
+        with st.expander(f"{label} ({len(items)})", expanded=(finding_type == "actions" and bool(items))):
+            st.caption(payload.get("overview") or f"No grounded {finding_type} found.")
+            if not items:
+                continue
+            for index, item in enumerate(items, start=1):
+                score = item.get("score")
+                score_label = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+                st.markdown(
+                    f"""
+                    <div class="mare-card" style="margin-bottom:0.75rem;">
+                      <div class="mare-label">{label[:-1] if label.endswith('s') else label} {index}</div>
+                      <div class="mare-value">{item.get('snippet') or '[no snippet available]'}</div>
+                      <p class="mare-mini" style="margin-top:0.55rem;"><strong>Citation:</strong> {item.get('citation') or '[no citation available]'}</p>
+                      <p class="mare-mini"><strong>Signal:</strong> {item.get('signal') or '[no signal]'}</p>
+                      <p class="mare-mini"><strong>Score:</strong> {score_label}</p>
+                      <p class="mare-mini"><strong>Reason:</strong> {item.get('reason') or '[no reason available]'}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+
+def _render_review_snapshot(st, review: dict) -> None:
+    st.subheader("Document Review")
+    if not review:
+        st.caption("No grounded review is available for this run.")
+        return
+
+    best = review.get("best_evidence", {})
+    support = review.get("support") or {}
+    finding_counts = review.get("finding_counts") or {}
+    st.markdown(
+        f"""
+        <div class="mare-card" style="margin-bottom:1rem;">
+          <div class="mare-label">Review Overview</div>
+          <div class="mare-value">{review.get('overview') or 'No grounded review available.'}</div>
+          <p class="mare-mini" style="margin-top:0.7rem;"><strong>Support:</strong> {support.get('label') or '[no support label]'}</p>
+          <p class="mare-mini"><strong>Primary citation:</strong> {best.get('citation') or '[no citation available]'}</p>
+          <p class="mare-mini"><strong>Findings:</strong> actions={finding_counts.get('actions', 0)}, requirements={finding_counts.get('requirements', 0)}, risks={finding_counts.get('risks', 0)}, deadlines={finding_counts.get('deadlines', 0)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    highlights = review.get("highlights") or []
+    if highlights:
+        for index, item in enumerate(highlights, start=1):
+            st.markdown(
+                f"""
+                <div class="mare-card" style="margin-bottom:0.75rem;">
+                  <div class="mare-label">Review Highlight {index}</div>
+                  <div class="mare-value">{item}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
 def _resolved_image_path(*candidates: str) -> Path | None:
     for candidate in candidates:
         if not candidate:
@@ -450,6 +568,20 @@ def _resolved_image_path(*candidates: str) -> Path | None:
         if path.is_file():
             return path
     return None
+
+
+def _resolve_retriever_choice(retriever_key: str) -> tuple[str, str]:
+    from mare.extensions import recommended_retriever_key
+
+    if retriever_key != "smart":
+        return retriever_key, ""
+    if recommended_retriever_key() == "hybrid-semantic":
+        return "hybrid-semantic", "Smart default promoted to Hybrid semantic + lexical retrieval."
+    return "builtin", "Smart default fell back to Built-in lexical retrieval because sentence-transformers is not installed."
+
+
+def _retriever_label_for_value(value: str) -> str:
+    return next(label for label, meta in RETRIEVER_OPTIONS.items() if meta["value"] == value)
 
 
 def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
@@ -467,14 +599,15 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
 
     retriever_factories = {}
     reranker = None
+    resolved_retriever_key, retriever_resolution_note = _resolve_retriever_choice(retriever_key)
 
-    if retriever_key == "sentence-transformers":
+    if resolved_retriever_key == "sentence-transformers":
         retriever_factories[Modality.TEXT] = lambda documents: SentenceTransformersRetriever(documents)
-    elif retriever_key == "hybrid-semantic":
+    elif resolved_retriever_key == "hybrid-semantic":
         retriever_factories[Modality.TEXT] = lambda documents: HybridSemanticRetriever(documents)
-    elif retriever_key == "faiss":
+    elif resolved_retriever_key == "faiss":
         retriever_factories[Modality.TEXT] = lambda documents: FAISSRetriever(documents)
-    elif retriever_key == "qdrant":
+    elif resolved_retriever_key == "qdrant":
         retriever_factories[Modality.TEXT] = lambda documents: QdrantHybridRetriever(
             documents,
             collection_name=qdrant_collection,
@@ -485,7 +618,12 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
     if reranker_key == "fastembed":
         reranker = FastEmbedReranker()
 
-    config = MAREConfig(retriever_factories=retriever_factories, reranker=reranker)
+    config = MAREConfig(
+        retriever_factories=retriever_factories,
+        reranker=reranker,
+        retriever_label=_retriever_label_for_value(resolved_retriever_key),
+        retriever_resolution_note=retriever_resolution_note,
+    )
 
     def _loader(source_paths: list[Path], reuse: bool):
         apps = [load_document(source_path=source_path, reuse=reuse, parser=parser_key, config=config) for source_path in source_paths]
@@ -498,7 +636,7 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
         return multi_app
 
     def _maybe_index(app):
-        if retriever_key != "qdrant" or not qdrant_index_before_query:
+        if resolved_retriever_key != "qdrant" or not qdrant_index_before_query:
             return None
         indexer = QdrantIndexer(
             collection_name=qdrant_collection,
@@ -508,7 +646,13 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
         indexed = indexer.index_documents(app.documents, recreate=True)
         return {"backend": "qdrant", "indexed_documents": indexed, "collection": qdrant_collection}
 
-    return _loader, _maybe_index
+    runtime_details = {
+        "configured_retriever": retriever_key,
+        "resolved_retriever": resolved_retriever_key,
+        "retriever_resolution_note": retriever_resolution_note,
+    }
+
+    return _loader, _maybe_index, runtime_details
 
 
 def _build_output_preview(app, query: str, top_k: int, output_mode: str):
@@ -568,7 +712,7 @@ def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict)
     reranker_key = stack_controls["reranker"]["value"]
     output_mode = stack_controls["output"]["value"]
 
-    loader, maybe_index = _build_runtime(
+    loader, maybe_index, runtime_details = _build_runtime(
         parser_key=parser_key,
         retriever_key=retriever_key,
         reranker_key=reranker_key,
@@ -590,16 +734,18 @@ def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict)
 
     stack_summary = {
         "parser": next(label for label, meta in PARSER_OPTIONS.items() if meta["value"] == parser_key),
-        "retriever": next(label for label, meta in RETRIEVER_OPTIONS.items() if meta["value"] == retriever_key),
+        "retriever": _retriever_label_for_value(retriever_key),
+        "resolved_retriever": _retriever_label_for_value(runtime_details["resolved_retriever"]),
         "reranker": next(label for label, meta in RERANKER_OPTIONS.items() if meta["value"] == reranker_key),
         "output_mode": next(label for label, meta in OUTPUT_OPTIONS.items() if meta["value"] == output_mode),
         "summary": (
             f"This run used the {next(label for label, meta in PARSER_OPTIONS.items() if meta['value'] == parser_key)} parser, "
-            f"{next(label for label, meta in RETRIEVER_OPTIONS.items() if meta['value'] == retriever_key)} retrieval, "
+            f"{_retriever_label_for_value(runtime_details['resolved_retriever'])} retrieval, "
             f"and {next(label for label, meta in RERANKER_OPTIONS.items() if meta['value'] == reranker_key)} reranking "
             f"across {len(source_paths)} document{'s' if len(source_paths) != 1 else ''}."
         ),
         "indexing": indexing_summary,
+        "retriever_resolution_note": runtime_details["retriever_resolution_note"],
     }
     run_signature = _build_run_signature(
         uploaded_filenames=[item.name for item in uploaded_sources],
@@ -607,16 +753,16 @@ def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict)
         top_k=top_k,
         stack_controls=stack_controls,
     )
+    evidence_payload = hits_to_evidence_payload(query=query, hits=explanation.fused_results)
 
     st.session_state["mare_result"] = {
         "query": query,
         "corpus_path": str(corpus_path) if corpus_path else "",
         "corpus_paths": [str(path) for path in app.corpus_paths],
         "explanation": explanation,
-        "grounded_summary": hits_to_evidence_payload(query=query, hits=explanation.fused_results).get(
-            "summary",
-            {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []},
-        ),
+        "grounded_summary": evidence_payload.get("summary", {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []}),
+        "grounded_findings": evidence_payload.get("findings", {}),
+        "grounded_review": evidence_payload.get("review", {}),
         "filenames": [item.name for item in uploaded_sources],
         "app": app,
         "stack": stack_summary,
@@ -671,7 +817,7 @@ def main() -> None:
         st.write("1. Upload one or more documents")
         st.write("2. Ask a concrete instruction question")
         st.write("3. Inspect the citation, any available visual proof, and the agent-facing output shape")
-        st.caption("Recommended starting point: `Basic` mode, which uses the built-in parser and built-in lexical evidence retrieval.")
+        st.caption("Recommended starting point: `Basic` mode, which uses the built-in parser and a smart retrieval default that prefers hybrid evidence retrieval when available.")
         st.markdown("**Good test prompts**")
         st.code("partially reinstall the set screws if they fall out", language="text")
         st.code("how do I connect the AC adapter", language="text")
@@ -709,7 +855,7 @@ def main() -> None:
                 qdrant_index_before_query = st.checkbox("Index current documents into Qdrant before retrieval", value=False)
         else:
             parser_label = "Builtin PDF"
-            retriever_label = "Built-in lexical (Recommended)"
+            retriever_label = "Smart default (Recommended)"
             reranker_label = "None"
             output_label = "MARE evidence"
             reuse_corpus = False
@@ -732,18 +878,24 @@ def main() -> None:
         st.markdown("---")
         st.caption("The Streamlit app is the visual playground. The Python package is the deeper document evidence layer that developers and agents can call directly.")
         if mode == "Basic":
-            st.success("Using the recommended default stack: built-in parser + built-in lexical evidence retrieval.")
+            resolved_retriever_key, retriever_resolution_note = _resolve_retriever_choice("smart")
+            st.success(
+                f"Using the recommended default stack: built-in parser + {_retriever_label_for_value(resolved_retriever_key)}."
+            )
+            if retriever_resolution_note:
+                st.caption(retriever_resolution_note)
         st.markdown("---")
         _render_recent_runs(st, st.session_state["mare_ui_history"])
         if st.button("Clear recent runs"):
             st.session_state["mare_ui_history"] = _clear_ui_session_history()
             st.success("Cleared saved UI run history.")
 
+    _render_getting_started(st)
     uploaded_pdf = st.file_uploader("Upload one or more documents", type=["pdf", "md", "markdown", "txt", "docx"], accept_multiple_files=True)
     query = st.text_input(
         "Ask a question about the documents",
         key="mare_query_input",
-        placeholder="Try: partially reinstall the set screws if they fall out",
+        placeholder=f"Try: {STARTER_PROMPTS[1]}",
         on_change=lambda: st.session_state.__setitem__("mare_submit_via_enter", True),
     )
     top_k = st.slider("How many results to show", min_value=1, max_value=5, value=3)
@@ -751,8 +903,7 @@ def main() -> None:
     submitted = st.button("Ask MARE")
 
     if not uploaded_pdf:
-        st.info("Upload one or more documents to start. PDFs, Word docs, Markdown, and text files work best right now.")
-        st.caption("PDFs currently have the strongest visual proof flow. Markdown, text, and DOCX rely more on snippet + citation proof.")
+        _render_upload_empty_state(st)
         return
 
     if submitted or st.session_state.get("mare_submit_via_enter"):
@@ -876,7 +1027,13 @@ def main() -> None:
         _render_stack_summary(st, result["stack"])
 
     st.markdown("")
+    _render_review_snapshot(st, result.get("grounded_review") or {})
+
+    st.markdown("")
     _render_grounded_summary(st, result.get("grounded_summary") or {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []})
+
+    st.markdown("")
+    _render_grounded_findings(st, result.get("grounded_findings") or {})
 
     st.markdown("")
     _render_page_objects(st, app.get_page_objects(best.doc_id, limit=6) if app else [])

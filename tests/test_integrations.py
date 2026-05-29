@@ -5,6 +5,9 @@ import types
 
 from mare import MAREApp
 from mare.integrations import (
+    build_all_grounded_findings_payload,
+    build_grounded_findings_payload,
+    build_grounded_review_payload,
     build_grounded_summary_payload,
     create_langchain_tool,
     create_langgraph_tool,
@@ -91,6 +94,95 @@ def test_build_grounded_summary_payload_handles_no_results() -> None:
     assert payload["overview"] == "No grounded evidence found."
     assert payload["highlight_count"] == 0
     assert payload["highlights"] == []
+
+
+def test_build_grounded_findings_payload_extracts_actions_and_requirements() -> None:
+    results = [
+        {
+            "citation": "manual.pdf | page 4",
+            "title": "Manual",
+            "page": 4,
+            "score": 0.91,
+            "object_type": "procedure",
+            "snippet": "You must connect the AC adapter before powering on the device.",
+            "reason": "Matched setup requirement language",
+            "metadata": {"source": "manual.pdf"},
+        },
+        {
+            "citation": "policy.docx | page 2",
+            "title": "Policy",
+            "page": 2,
+            "score": 0.78,
+            "object_type": "section",
+            "snippet": "Submit the signed acknowledgement within 5 days of receipt.",
+            "reason": "Matched policy action and deadline wording",
+            "metadata": {"source": "policy.docx"},
+        },
+    ]
+
+    actions = build_grounded_findings_payload(results, finding_type="actions")
+    requirements = build_grounded_findings_payload(results, finding_type="requirements")
+
+    assert actions["item_count"] == 2
+    assert actions["items"][0]["signal"].lower() == "must"
+    assert requirements["item_count"] == 1
+    assert requirements["items"][0]["citation"] == "manual.pdf | page 4"
+
+
+def test_build_all_grounded_findings_payload_extracts_risks_and_deadlines() -> None:
+    results = [
+        {
+            "citation": "safety.pdf | page 8",
+            "title": "Safety",
+            "page": 8,
+            "score": 0.88,
+            "object_type": "section",
+            "snippet": "Warning: do not expose the battery to water.",
+            "reason": "Matched warning language",
+            "metadata": {"source": "safety.pdf"},
+        },
+        {
+            "citation": "policy.docx | page 3",
+            "title": "Policy",
+            "page": 3,
+            "score": 0.76,
+            "object_type": "section",
+            "snippet": "Complete the training by March 15, 2026.",
+            "reason": "Matched due-date language",
+            "metadata": {"source": "policy.docx"},
+        },
+    ]
+
+    findings = build_all_grounded_findings_payload(results)
+
+    assert findings["risks"]["item_count"] == 1
+    assert findings["risks"]["items"][0]["signal"].lower() == "warning"
+    assert findings["deadlines"]["item_count"] == 1
+    assert findings["deadlines"]["items"][0]["citation"] == "policy.docx | page 3"
+
+
+def test_build_grounded_review_payload_summarizes_best_evidence_and_findings() -> None:
+    results = [
+        {
+            "citation": "manual.pdf | page 4",
+            "title": "Manual",
+            "page": 4,
+            "score": 0.91,
+            "object_type": "procedure",
+            "snippet": "You must connect the AC adapter before powering on the device.",
+            "reason": "Matched setup requirement language",
+            "metadata": {"source": "manual.pdf"},
+        }
+    ]
+
+    review = build_grounded_review_payload(
+        results,
+        support={"label": "Strong support", "message": "Grounded evidence looks strong for this answer."},
+    )
+
+    assert review["best_evidence"]["citation"] == "manual.pdf | page 4"
+    assert review["support"]["label"] == "Strong support"
+    assert "Support: Strong support" in review["highlights"]
 
 
 def test_format_evidence_citation_uses_line_metadata_when_available() -> None:
