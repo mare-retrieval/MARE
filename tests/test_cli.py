@@ -11,7 +11,8 @@ def test_main_prints_help(capsys, monkeypatch) -> None:
     main()
     output = capsys.readouterr().out
 
-    assert "One product, multiple modes" in output
+    assert "Grounded answers over documents and folders, with proof." in output
+    assert "mare start" in output
     assert "mare ui" in output
     assert "mare chat" in output
 
@@ -30,3 +31,19 @@ def test_main_dispatches_to_subcommand(monkeypatch) -> None:
     main()
 
     assert captured["argv"] == ["mare ask", "manual.pdf", "adapter"]
+
+
+def test_main_dispatches_to_start(monkeypatch) -> None:
+    captured = {}
+
+    class _FakeModule:
+        @staticmethod
+        def main():
+            captured["argv"] = list(sys.argv)
+
+    monkeypatch.setattr(sys, "argv", ["mare", "start", "./docs"])
+    monkeypatch.setitem(sys.modules, "mare.start", _FakeModule)
+
+    main()
+
+    assert captured["argv"] == ["mare start", "./docs"]

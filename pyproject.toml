@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mare-retrieval"
-version = "0.4.3"
-description = "Evidence-first PDF retrieval layer for developers and agents that returns the best page, exact snippet, highlight, and visual proof."
+version = "0.4.4"
+description = "Grounded document evidence engine for developers and agents that returns inspectable answers with citations, snippets, highlights, and proof."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-  { name = "Sai Sandeep Kantareddy", email = "mare.retrieval@gmail.com" }
+  { name = "Sai Sandeep Kantareddy", email = "saisandeep.kantareddy@gmail.com" }
 ]
 keywords = ["retrieval", "rag", "pdf", "document-ai", "evidence", "search"]
 classifiers = [

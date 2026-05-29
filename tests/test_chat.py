@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 
 from mare.chat import _build_app_from_args, _discover_folder_inputs, build_session_store, run_chat
+from mare.extensions import MAREConfig
 from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 
 
@@ -17,6 +18,10 @@ class _FakeApp:
         self.source_pdf = Path("manual.pdf")
         self.source_pdfs = [self.source_pdf]
         self.documents = [object()]
+        self.config = MAREConfig(
+            retriever_label="Hybrid semantic + lexical",
+            retriever_resolution_note="Defaulted to Hybrid semantic + lexical retrieval because sentence-transformers is available.",
+        )
 
     def describe_corpus(self, page_limit: int = 3, object_limit: int = 5):
         return {"page_count": 1, "object_counts": {"procedure": 1}}
@@ -164,7 +169,9 @@ def test_run_chat_answers_question_and_exits(monkeypatch, capsys) -> None:
     assert "MARE Chat" in output
     assert "Loaded documents: manual.md" in output
     assert "Intent: semantic_lookup" in output
+    assert "Retriever: Hybrid semantic + lexical" in output
     assert "Confidence: 0.800" in output
+    assert "Support: Strong support" in output
     assert "Best page: 10" in output
     assert "Citation: manual.pdf | page 10" in output
     assert "Score: 0.950" in output
@@ -284,6 +291,73 @@ def test_run_chat_summary_command_handles_no_matches(monkeypatch, capsys) -> Non
     output = capsys.readouterr().out
 
     assert "Summary: No matching evidence found." in output
+
+
+def test_run_chat_supports_actions_command(monkeypatch, capsys) -> None:
+    answers = iter([":actions connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Actions query: connect the adapter" in output
+    assert "Found 2 grounded actions." in output
+    assert "Citation: manual.pdf | page 10" in output
+
+
+def test_run_chat_supports_deadlines_command(monkeypatch, capsys) -> None:
+    class _DeadlineApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            return RetrievalExplanation(
+                plan=QueryPlan(
+                    query=query,
+                    selected_modalities=[Modality.TEXT],
+                    discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                    confidence=0.8,
+                    intent="semantic_lookup",
+                    rationale="test",
+                ),
+                per_modality_results={},
+                fused_results=[
+                    RetrievalHit(
+                        doc_id="doc-3",
+                        title="Policy",
+                        page=4,
+                        modality=Modality.TEXT,
+                        score=0.84,
+                        reason="Matched due-date language in the policy.",
+                        snippet="Submit the signed acknowledgement by March 15, 2026.",
+                        page_image_path="generated/policy/page-4.png",
+                        highlight_image_path="generated/policy/highlight-4.png",
+                        object_id="doc-3:section:1",
+                        object_type="section",
+                        metadata={"source": "policy.docx"},
+                    ),
+                ],
+            )
+
+    answers = iter([":deadlines onboarding acknowledgement", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_DeadlineApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Deadlines query: onboarding acknowledgement" in output
+    assert "Found 1 grounded deadlines." in output
+    assert "Signal: by March" in output
+
+
+def test_run_chat_supports_review_command(monkeypatch, capsys) -> None:
+    answers = iter([":review connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Review query: connect the adapter" in output
+    assert "Grounded review assembled from the best supporting evidence." in output
+    assert "Primary citation: manual.pdf | page 10" in output
+    assert "Findings: actions=2, requirements=0, risks=0, deadlines=1" in output
 
 
 def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:

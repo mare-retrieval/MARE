@@ -7,12 +7,12 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 
 setup(
     name="mare-retrieval",
-    version="0.4.3",
-    description="Evidence-first PDF retrieval library for developers and agents that returns the best page, exact snippet, highlight, and visual proof.",
+    version="0.4.4",
+    description="Grounded document evidence engine for developers and agents that returns inspectable answers with citations, snippets, highlights, and proof.",
     long_description=README,
     long_description_content_type="text/markdown",
-    author="Saisandeep Kantareddy",
-    author_email=" ",
+    author="Sai Sandeep Kantareddy",
+    author_email="saisandeep.kantareddy@gmail.com",
     url="https://github.com/mare-retrieval/MARE",
     package_dir={"": "src"},
     packages=find_packages("src"),

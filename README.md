@@ -4,9 +4,9 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
 [![Publish to PyPI](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml)
 
-MARE is an open-source Python library for evidence-first document retrieval and grounded document work for developers and agents.
+MARE is an open-source grounded document evidence engine for developers and agents.
 
-Given a document and a question, MARE is built to return:
+Given a document or folder of documents and a question, MARE is built to return:
 
 - the best matching page or document region
 - the exact evidence snippet
@@ -15,13 +15,13 @@ Given a document and a question, MARE is built to return:
 - a highlighted evidence image when the match can be localized
 - retrieval rationale for debugging and trust
 
-The bigger goal is simple:
+The product goal is simple:
 
-- let agents and applications ask questions over documents and folders
+- let users, agents, and applications ask questions over documents and folders
 - return grounded evidence instead of vague document answers
 - make the answer inspectable as page or line citation, snippet, highlight, and visual proof when available
 
-MARE is meant to sit underneath agent logic and application logic as the document evidence layer.
+MARE is meant to sit underneath product, agent, and application logic as the document evidence layer.
 
 Today MARE is strongest on PDFs, and now also supports first-pass local workflows for:
 
@@ -44,6 +44,12 @@ mare --help
 ```
 
 That gives you one front door into the product.
+
+If you want the fastest guided first run, use:
+
+```bash
+mare start
+```
 
 ## One product, four ways to use it
 
@@ -68,16 +74,19 @@ Start with whichever mode fits you:
 
 If you are new to MARE, use this order:
 
-1. `mare ui`
+1. `mare start`
+   - best for the fastest guided first run
+   - tells you the right next command for a document, folder, or the bundled mixed-document example
+2. `mare ui`
    - best for visual proof, screenshots, and product demos
    - easiest way to understand MARE in seconds
-2. `mare chat`
+3. `mare chat`
    - best for a simple “document agent” experience over a folder of documents
    - gives you answers with file, citation, snippet, and highlight paths when available
-3. `mare workflow`
+4. `mare workflow`
    - fastest way to see what MARE returns in a terminal
    - best for backend teams and enterprise evaluation
-4. `mare mcp`
+5. `mare mcp`
    - best when you want another client, agent, or app platform to call MARE as a tool
 
 ### First 3 minutes
@@ -92,6 +101,13 @@ Install the UI extra if you want the visual playground:
 
 ```bash
 pip install "mare-retrieval[ui]"
+```
+
+Get the guided first-run path:
+
+```bash
+mare start
+mare start ./examples/mixed_docs
 ```
 
 Launch the UI:
@@ -148,6 +164,18 @@ That should already show the core product value:
 - evidence object type
 - retrieval reason
 
+If you want the higher-level “wow” workflow, use review mode:
+
+```bash
+mare workflow --folder ./examples/mixed_docs --query "show me the onboarding steps" --task review
+```
+
+Inside chat, you can also ask for a grounded review:
+
+```text
+:review show me the onboarding steps
+```
+
 ### Mixed-document example
 
 You can try the runnable example folder in this repo:
@@ -203,6 +231,7 @@ Then ask questions like:
 - `how do I connect the AC adapter`
 - `show me the onboarding steps`
 - `compare the setup instructions across these docs`
+- `review the onboarding tasks, risks, and deadlines`
 
 What to expect:
 
@@ -218,6 +247,7 @@ What to expect:
 - object search before final retrieval
 - grounded evidence output over a whole document tree
 - a more enterprise/backend-friendly flow than interactive chat
+- a one-shot grounded review with actions, requirements, risks, and deadlines
 
 Example:
 
@@ -594,9 +624,14 @@ Inside `mare chat`, ask questions naturally or use:
 - `:sources`
 - `:history`
 - `:clear-history`
+- `:review <question>`
 - `:steps <question>`
 - `:compare <question>`
 - `:summary <question>`
+- `:actions <question>`
+- `:requirements <question>`
+- `:risks <question>`
+- `:deadlines <question>`
 - `:json <question>`
 - `:quit`
 
@@ -989,6 +1024,8 @@ That returns the full MARE evidence payload with:
 - `results`
 - `comparison`
 - `summary`
+- `findings`
+- `review`
 
 Example: use MARE as a LangGraph-ready evidence tool.
 
