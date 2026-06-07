@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 from dataclasses import dataclass, field
@@ -85,6 +86,35 @@ class MAREConfig:
     parser: str | DocumentParser | None = None
     retriever_factories: dict[Modality, RetrieverFactory] = field(default_factory=dict)
     reranker: ResultReranker | None = None
+    retriever_label: str = ""
+    retriever_resolution_note: str = ""
+
+
+def _module_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def recommended_retriever_key() -> str:
+    return "hybrid-semantic" if _module_available("sentence_transformers") else "builtin"
+
+
+def resolve_runtime_config(config: MAREConfig | None = None) -> MAREConfig:
+    if config is not None:
+        return config
+
+    if recommended_retriever_key() != "hybrid-semantic":
+        return MAREConfig(
+            retriever_label="Built-in lexical",
+            retriever_resolution_note=(
+                "Defaulted to Built-in lexical retrieval because sentence-transformers is not installed."
+            ),
+        )
+
+    return MAREConfig(
+        retriever_factories={Modality.TEXT: lambda documents: HybridSemanticRetriever(documents)},
+        retriever_label="Hybrid semantic + lexical",
+        retriever_resolution_note="Defaulted to Hybrid semantic + lexical retrieval because sentence-transformers is available.",
+    )
 
 
 class BuiltinPDFParser:

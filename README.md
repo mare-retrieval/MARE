@@ -4,459 +4,46 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/mare-retrieval.svg)](https://pypi.org/project/mare-retrieval/)
 [![Publish to PyPI](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml/badge.svg)](https://github.com/mare-retrieval/MARE/actions/workflows/publish.yml)
 
-MARE is an open-source grounded document evidence engine for developers and agents.
+MARE is an open-source grounded document evidence engine for agents and developers.
 
-Given a document or folder of documents and a question, MARE is built to return:
-
-- the best matching page or document region
-- the exact evidence snippet
-- a readable citation
-- a rendered page image when available
-- a highlighted evidence image when the match can be localized
-- retrieval rationale for debugging and trust
-
-The product goal is simple:
-
-- let users, agents, and applications ask questions over documents and folders
-- return grounded evidence instead of vague document answers
-- make the answer inspectable as page or line citation, snippet, highlight, and visual proof when available
-
-MARE is meant to sit underneath product, agent, and application logic as the document evidence layer.
-
-Today MARE is strongest on PDFs, and now also supports first-pass local workflows for:
-
-- `pdf`
-- `md` / `markdown`
-- `txt`
-- `docx`
-
-Important:
-
-- PDFs still have the strongest proof experience because they support rendered pages and highlighted evidence images
-- text, markdown, and docx currently rely more on snippet + citation proof
-
-## One product, one command
-
-The simplest way to approach MARE now is:
-
-```bash
-mare --help
-```
-
-That gives you one front door into the product.
-
-If you want the fastest guided first run, use:
-
-```bash
-mare start
-```
-
-## One product, four ways to use it
-
-MARE should feel like one product, not a pile of commands.
-
-Start with whichever mode fits you:
-
-- `mare ui`
-  - the visual playground
-  - best for seeing the product click in seconds
-- `mare chat`
-  - the simple document agent
-  - best for asking questions over a folder of documents
-- `mare workflow`
-  - the structured terminal workflow
-  - best for backend and enterprise evaluation
-- `mare mcp`
-  - the integration layer
-  - best for agent platforms, apps, and tool use
-
-## Start here
-
-If you are new to MARE, use this order:
-
-1. `mare start`
-   - best for the fastest guided first run
-   - tells you the right next command for a document, folder, or the bundled mixed-document example
-2. `mare ui`
-   - best for visual proof, screenshots, and product demos
-   - easiest way to understand MARE in seconds
-3. `mare chat`
-   - best for a simple “document agent” experience over a folder of documents
-   - gives you answers with file, citation, snippet, and highlight paths when available
-4. `mare workflow`
-   - fastest way to see what MARE returns in a terminal
-   - best for backend teams and enterprise evaluation
-5. `mare mcp`
-   - best when you want another client, agent, or app platform to call MARE as a tool
-
-### First 3 minutes
-
-Install from PyPI:
-
-```bash
-pip install mare-retrieval
-```
-
-Install the UI extra if you want the visual playground:
-
-```bash
-pip install "mare-retrieval[ui]"
-```
-
-Get the guided first-run path:
-
-```bash
-mare start
-mare start ./examples/mixed_docs
-```
-
-Launch the UI:
-
-```bash
-mare ui
-```
-
-Then open:
+Point MARE at a document or folder, ask a question, and get inspectable proof:
 
 ```text
-http://localhost:8501
+documents -> exact evidence -> source coverage -> support strength -> gaps -> next questions
 ```
 
-Upload one or more documents, ask a concrete question, and MARE will show:
+MARE is not another generic chat-with-PDF app. It is the document evidence layer underneath products, RAG systems, MCP tools, OpenClaw/Hermes-style agents, and local document workflows.
 
-- the source file
-- the best page or region
-- the exact snippet
-- the citation
-- the highlighted proof when available
+## Trust-First Demo
 
-The UI also saves lightweight recent-run history by default under `generated/ui_sessions/playground-history.json`, so you can come back and inspect prior questions, sources, and citations from the sidebar.
-
-Ask one document a question:
+From a repo checkout:
 
 ```bash
-mare ask manual.pdf "how do I connect the AC adapter"
+mare workflow --folder ./examples/mixed_docs --query "show me the onboarding steps" --task brief
 ```
 
-Run the fuller agent-style workflow:
+Or:
 
 ```bash
-mare workflow --document guide.md --query "how do I connect the AC adapter"
+PYTHONPATH=src python3 examples/evidence_brief_demo.py
 ```
 
-By default, `mare workflow` also saves lightweight run history under `generated/workflow_runs/` so terminal evaluations are easy to revisit later.
-
-Or use the simple chat-style interface over a folder of mixed documents:
-
-```bash
-mare chat --folder ./docs
-```
-
-That works directly with no extra filters. `--include` and `--exclude` are optional when you need to narrow a larger tree.
-By default, `mare chat` also saves a lightweight JSON session history under `generated/chat_sessions/` so you can revisit recent document work later.
-
-That should already show the core product value:
-
-- best page
-- citation
-- exact snippet
-- highlight path
-- evidence object type
-- retrieval reason
-
-If you want the higher-level “wow” workflow, use review mode:
-
-```bash
-mare workflow --folder ./examples/mixed_docs --query "show me the onboarding steps" --task review
-```
-
-Inside chat, you can also ask for a grounded review:
+Example output shape:
 
 ```text
-:review show me the onboarding steps
+Evidence brief query: show me the onboarding steps
+Weak support from 1 retrieved result across 1 source.
+Support note: Evidence is weak or ambiguous. Inspect the proof carefully or refine the question.
+Sources: employee-onboarding.docx
+Source coverage: Single-source coverage
+Proof assets: snippet, citation
+Evidence gap 1: Support is weak; ask a narrower question or increase top-k.
+Next question 1: Find stronger evidence for: show me the onboarding steps
 ```
 
-### Mixed-document example
+That is the core MARE difference: it shows proof, source coverage, support level, conflict signals when detected, gaps, and the next evidence-seeking move.
 
-You can try the runnable example folder in this repo:
-
-```bash
-mare chat --folder ./examples/mixed_docs
-```
-
-Or return a structured workflow payload over the same folder:
-
-```bash
-mare workflow --document ./examples/mixed_docs/device-manual.md --query "how do I connect the AC adapter"
-PYTHONPATH=src python3 examples/mixed_docs_workflow.py --folder ./examples/mixed_docs --query "how do I connect the AC adapter"
-```
-
-If you want the terminal-first evaluation path over a whole document workspace, use:
-
-```bash
-mare workflow --folder ./examples/mixed_docs --query "how do I connect the AC adapter"
-```
-
-Both commands work as-is without `--include` or `--exclude`.
-If you need to narrow a larger folder later, you can add optional globs like:
-
-```bash
-mare chat --folder ./docs --include "*.md" --exclude "archive/*"
-mare workflow --folder ./docs --include "*.docx" --query "show me the onboarding steps"
-```
-
-You can also keep a named workflow run trail for a document workspace:
-
-```bash
-mare workflow --folder ./examples/mixed_docs --query "show me the onboarding steps" --history-name mixed-docs-review
-```
-
-Its contents look like this:
-
-```text
-examples/mixed_docs/
-  device-manual.md
-  support-notes.txt
-  employee-onboarding.docx
-```
-
-You can also point MARE at your own folder:
-
-```bash
-mare chat --folder ./docs
-```
-
-Then ask questions like:
-
-- `how do I connect the AC adapter`
-- `show me the onboarding steps`
-- `compare the setup instructions across these docs`
-- `review the onboarding tasks, risks, and deadlines`
-
-What to expect:
-
-- for PDFs, MARE can often return page-based proof plus highlighted evidence images
-- for Markdown, text, and DOCX, MARE will usually return snippet + citation proof first
-- the same evidence-first retrieval flow works across the whole folder
-
-### Workflow over folders
-
-`mare workflow --folder ...` is the best terminal-first evaluation path when you want:
-
-- corpus summary
-- object search before final retrieval
-- grounded evidence output over a whole document tree
-- a more enterprise/backend-friendly flow than interactive chat
-- a one-shot grounded review with actions, requirements, risks, and deadlines
-
-Example:
-
-```bash
-mare workflow --folder ./examples/mixed_docs --query "show me the onboarding steps"
-```
-
-Optional narrowing on larger trees:
-
-```bash
-mare workflow --folder ./docs --include "*.docx" --exclude "archive/*" --query "show me the onboarding steps"
-```
-
-## Two main entrypoints
-
-If you only remember two things, make them these:
-
-### 1. `mare-ui`
-
-For most new users, this is the best starting point.
-
-```bash
-pip install "mare-retrieval[ui]"
-mare ui
-```
-
-What you get:
-
-- upload documents
-- ask questions
-- inspect highlighted evidence
-- compare results visually
-- understand the product fast
-
-### 2. `mare-chat`
-
-This is the simplest “agent-like” local experience.
-
-```bash
-mare chat --folder ./docs
-```
-
-What you get:
-
-- ask questions over a folder of documents
-- see source file + citation + snippet + highlight path when available
-- stay in a local terminal loop
-
-That’s the closest current experience to “Cursor for documents,” while still keeping MARE grounded in evidence retrieval instead of vague answer generation.
-
-### Where generated files go
-
-When MARE ingests a PDF, it typically writes:
-
-- corpus JSON: `generated/<pdf-name>.json`
-- rendered page images: `generated/<pdf-name>/page-*.png`
-- highlight images: `generated/<pdf-name>/highlights/*.png`
-- chat session history: `generated/chat_sessions/<session-name>.json`
-- workflow run history: `generated/workflow_runs/<history-name>.json`
-- UI recent runs: `generated/ui_sessions/playground-history.json`
-
-You can see those paths directly in:
-
-- `mare ask`
-- `mare workflow`
-- the Streamlit playground (`mare ui`)
-
-For `mare chat`, session history is enabled by default. Useful options:
-
-- `--session-name <name>` to pick a readable saved session name
-- `--session-file <path>` to control exactly where the JSON history is written
-- `--no-history` to keep a session ephemeral
-
-For `mare workflow`, run history is enabled by default. Useful options:
-
-- `--history-name <name>` to give a workflow run series a readable name
-- `--history-file <path>` to control exactly where the JSON run history is written
-- `--no-history` to keep a workflow invocation ephemeral
-
-For `mare ui`, recent runs are enabled by default and appear in the sidebar. The current UI supports clearing that saved run history directly from the app.
-
-### Which interface should I use?
-
-| Interface | Best for | What you get |
-| --- | --- | --- |
-| `mare ask` | fastest first test | best page, snippet, image paths |
-| `mare chat` | simple document-agent loop | ask questions over a folder of documents, get file/citation/snippet/highlight when available |
-| `mare workflow` | terminal evaluation and agent-style output | corpus summary, object search, grounded retrieval |
-| `mare ui` | visual exploration | upload documents, inspect highlights when available, compare results |
-| `mare mcp` | integrations | tool server for MCP-capable clients and app platforms |
-
-It started from the broader multimodal retrieval direction highlighted by the IRPAPERS paper, but the current package is intentionally focused on a more concrete and reliable use case: local document retrieval with visible evidence that agents and developers can build on.
-
-Paper inspiration: https://arxiv.org/pdf/2602.17687
-
-## What MARE does today
-
-- Ingests local documents into MARE corpora
-- Supports first-pass local workflows for PDF, Markdown, text, and DOCX
-- Extracts text, document objects, and proof metadata
-- Renders page images for PDFs
-- Retrieves relevant pages for natural-language questions
-- Returns exact snippets instead of only broad page matches
-- Generates highlighted page images for matched PDF evidence
-- Extracts document objects such as procedures, sections, figures, and tables
-- Supports object-aware retrieval, with the strongest behavior today on procedures and sections
-- Exposes a Python API, CLI tools, and a Streamlit demo
-- Includes an evaluation harness for page/object/no-result benchmarking
-
-## The bigger picture
-
-MARE is not trying to be a full agent framework, vector database, or parser platform.
-
-MARE is trying to solve one hard layer well:
-
-```text
-question about documents -> grounded evidence -> agent/app uses that evidence
-```
-
-That means MARE should be the layer that returns:
-
-- the best page
-- the best citation
-- the best snippet
-- the best retrieved object when possible
-- the highlight or visual proof when available
-- a structured result that code, agents, and workflows can consume
-
-The built-in stack is the recommended default today. The advanced parsers, retrievers, rerankers, and framework adapters exist so teams can plug MARE into bigger systems without losing the evidence-first output shape.
-
-## What is still early or experimental
-
-- Table retrieval
-- Figure retrieval
-- Layout-aware retrieval beyond lightweight heuristics
-- Modality-aware routing as a fully learned system
-
-## Why this exists
-
-Most "chat with your documents" systems optimize for a polished answer. MARE is optimized for evidence.
-
-For manuals, support docs, procedures, and technical documentation, users usually want:
-
-- where is this in the document?
-- what exact instruction supports it?
-- can I inspect the page myself?
-
-That is the core product shape of MARE:
-
-```text
-document -> retrieval -> exact snippet -> citation -> highlighted evidence when available
-```
-
-For agents, the shape becomes:
-
-```text
-user question -> agent -> MARE -> page + snippet + highlight + proof
-```
-
-## Current architecture
-
-```text
-query
-  -> page and object retrieval
-  -> scoring and lightweight routing
-  -> best page + best object
-  -> snippet extraction
-  -> page image / highlighted evidence
-  -> explainable results
-```
-
-Current implementation choices:
-
-- Ingestion: `pypdf` + `pypdfium2`
-- Retrieval: lexical and phrase-aware scoring with object boosts
-- Object extraction: procedure, section, figure, and table-like objects
-- Highlighting: render matched text back onto the page image when possible
-- Explainability: reasons, selected object type, and score context
-
-## Repo layout
-
-```text
-src/mare/
-  engine.py
-  router.py
-  fusion.py
-  types.py
-  retrievers/
-examples/
-tests/
-```
-
-## Quickstart
-
-Clone and install for development:
-
-```bash
-git clone https://github.com/mare-retrieval/MARE.git
-cd MARE
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-Or install directly from GitHub:
-
-```bash
-pip install "git+https://github.com/mare-retrieval/MARE.git"
-```
+## Install
 
 Install from PyPI:
 
@@ -468,48 +55,129 @@ Install the visual playground:
 
 ```bash
 pip install "mare-retrieval[ui]"
-mare ui
 ```
 
-Recommended first command:
+Install from a repo checkout for examples and development:
+
+```bash
+git clone https://github.com/mare-retrieval/MARE.git
+cd MARE
+pip install -e ".[dev]"
+```
+
+## First Run
+
+Use the guided entrypoint:
+
+```bash
+mare start
+mare start ./examples/mixed_docs
+mare start ./docs
+```
+
+Run an Evidence Brief over your own folder:
+
+```bash
+mare workflow --folder ./docs --query "what does this document set require?" --task brief
+```
+
+Ask one document a question:
 
 ```bash
 mare ask manual.pdf "how do I connect the AC adapter"
 ```
 
-Recommended next command:
+Open the visual playground:
 
 ```bash
-mare workflow --document guide.md --query "how do I connect the AC adapter"
+mare ui
 ```
 
-Or start a simple document chat session:
+Then open:
+
+```text
+http://localhost:8501
+```
+
+## What You Get
+
+MARE can return:
+
+- best matching page, section, procedure, table-like object, or figure-like object
+- exact snippet
+- file, page, line, heading, or section-aware citation when available
+- rendered PDF page image when available
+- highlighted PDF proof image when localization is possible
+- retrieval rationale and score
+- Evidence Brief with source coverage, support strength, conflict hints, proof assets, gaps, and next questions
+- structured payloads for agents, tools, and applications
+
+## Supported Documents
+
+Current local document-first workflows support:
+
+- `pdf`
+- `md` / `markdown`
+- `txt`
+- first-pass `docx`
+
+PDFs currently have the strongest visual proof because MARE can render pages and highlight evidence. Markdown, text, and DOCX usually rely on snippet and citation proof first.
+
+## Product Surfaces
+
+| Interface | Best for | What you get |
+| --- | --- | --- |
+| `mare start` | guided onboarding | path-aware next commands |
+| `mare ask` | fastest single-document test | best page, snippet, citation, image paths |
+| `mare workflow` | terminal evaluation and agent-style output | corpus summary, object search, Evidence Brief, JSON payloads |
+| `mare chat` | simple local document-agent loop | `:brief`, `:review`, `:compare`, `:summary`, findings, session history |
+| `mare ui` | visual exploration | uploads, Evidence Briefs, summaries, findings, highlights |
+| `mare mcp` | agent/app integrations | MCP tools returning structured evidence payloads |
+
+## Agent Integrations
+
+MARE is useful for OpenClaw, Hermes Agent, and other tool-using agents because it gives them a grounded document-evidence tool instead of asking the model to guess from raw files.
+
+Use CLI mode when an agent can run shell commands:
 
 ```bash
-mare chat --folder ./docs
+mare workflow --folder ./docs --query "what should I do before onboarding is complete?" --task brief --format json
 ```
 
-What each install path gives you:
+Use MCP mode when an agent platform supports MCP tools:
 
-- `git clone` by itself does not install anything. It only gives you the source tree.
-- `pip install mare-retrieval` installs the lightweight core package from PyPI.
-- `pip install "git+https://github.com/mare-retrieval/MARE.git"` installs the same core package directly from GitHub.
-- `pip install -e ".[dev]"` from a clone installs the repo in editable mode plus test dependencies.
+```bash
+mare mcp
+```
 
-That base install is intentionally lightweight. It is enough for the built-in stack:
+See [AGENT_INTEGRATIONS.md](./AGENT_INTEGRATIONS.md) for OpenClaw/Hermes recipes, tool prompts, and safety guidance.
 
-- local document ingestion
-- corpus generation
-- built-in lexical and object-aware retrieval
-- PDF page images and evidence highlighting
-- citation-first proof for non-PDF docs
-- Python API and CLI usage
+## Python API
 
-Optional stacks such as Streamlit, sentence-transformers, FAISS, LangChain, OCR parsers, and other advanced integrations are installed through extras.
+```python
+from mare import load_document
 
-For most users, the best starting point is still MARE's built-in stack. The optional integrations are there to support experimentation, scaling, OCR-heavy documents, or agent/framework integration without changing the evidence-first contract.
+app = load_document("guide.md", reuse=True)
+best = app.best_match("how do I connect the AC adapter")
 
-Common extras:
+print(best.page)
+print(best.snippet)
+print(best.metadata.get("source"))
+```
+
+For richer agent payloads, use:
+
+```python
+from mare.integrations import hits_to_evidence_payload
+
+hits = app.retrieve("show me the onboarding steps", top_k=3)
+payload = hits_to_evidence_payload("show me the onboarding steps", hits)
+print(payload["evidence_brief"])
+```
+
+## Optional Integrations
+
+The base install stays lightweight. Add extras as needed:
 
 ```bash
 pip install "mare-retrieval[ui]"
@@ -521,1076 +189,83 @@ pip install "mare-retrieval[mcp]"
 pip install "mare-retrieval[integrations]"
 ```
 
-Then use it as a library:
+Advanced optional paths include hybrid semantic retrieval, sentence-transformers, FAISS, Qdrant, FastEmbed reranking, LangChain, LangGraph, LlamaIndex, Docling, Unstructured, PaddleOCR, and Surya.
 
-```python
-from mare import load_document
+## Generated Files
 
-app = load_document("guide.md", reuse=True)
-best = app.best_match("partially reinstall the set screws if they fall out")
+MARE writes local artifacts under `generated/` by default:
 
-print(best.page)
-print(best.snippet)
-print(best.metadata.get("source"))
-```
+- corpus JSON: `generated/<document-name>.json`
+- rendered PDF pages: `generated/<document-name>/page-*.png`
+- highlighted proof images: `generated/<document-name>/highlights/*.png`
+- chat session history: `generated/chat_sessions/`
+- workflow run history: `generated/workflow_runs/`
+- UI recent runs: `generated/ui_sessions/playground-history.json`
 
-Or try it from the CLI after ingesting a real PDF:
+Use `--no-history` on `mare chat` or `mare workflow` when you want ephemeral runs.
 
-```bash
-mare ingest "manual.pdf"
-mare demo --corpus "generated/manual.json" --query "how do I connect the AC adapter"
-```
-
-## Developer onboarding
-
-If you want a plug-and-play exploration path as a developer, start with:
-
-- `DEVELOPER_GUIDE.md`
-- `examples/developer_playground.ipynb`
-
-These are designed to help you:
-
-- ingest a local PDF
-- run a few example queries
-- inspect the returned evidence
-- look at extracted page objects
-- explore MARE from the core install before deciding which optional extras you need
-- use bundled example PDFs from `examples/sample_pdfs/` if you just want a quick smoke test
-
-Important:
-
-- the notebook lives in the GitHub repository, not in the installed PyPI package
-- it is meant for developers working from a local clone of the repo
-- if you only run `pip install mare-retrieval`, use the Python API and CLI examples in this README instead
-
-Bundled repository example PDFs:
-
-- `examples/sample_pdfs/device_setup_guide.pdf`
-- `examples/sample_pdfs/retrieval_benchmark_note.pdf`
-- `examples/sample_pdfs/support_troubleshooting_card.pdf`
-
-If you are working from a clone:
+## Development
 
 ```bash
-pip install -e ".[dev]"
-pip install notebook
-jupyter notebook examples/developer_playground.ipynb
-```
-
-## Simplest way to use it
-
-Use one command:
-
-```bash
-mare ask ./examples/sample_pdfs/device_setup_guide.pdf "how do I connect the AC adapter"
-```
-
-That will:
-
-- ingest the document if needed
-- retrieve the best matching page
-- print the page number
-- print the exact snippet
-- print the rendered page image path when available
-
-If you want to reuse a previously generated corpus:
-
-```bash
-mare ask --reuse ./examples/sample_pdfs/device_setup_guide.pdf "how do I connect the AC adapter"
-```
-
-If you want a more complete picture, including corpus summary and object search, use:
-
-```bash
-mare workflow --pdf ./examples/sample_pdfs/device_setup_guide.pdf --query "how do I connect the AC adapter"
-```
-
-You can also save or suppress workflow run history explicitly:
-
-```bash
-mare workflow --folder ./docs --query "show me the onboarding steps" --history-name ops-review
-mare workflow --folder ./docs --query "show me the onboarding steps" --history-file ./tmp/workflow-history.json
-mare workflow --folder ./docs --query "show me the onboarding steps" --no-history
-```
-
-If you want the most agent-like local experience without another platform, use:
-
-```bash
-mare chat --folder .
-```
-
-Inside `mare chat`, ask questions naturally or use:
-
-- `:sources`
-- `:history`
-- `:clear-history`
-- `:review <question>`
-- `:steps <question>`
-- `:compare <question>`
-- `:summary <question>`
-- `:actions <question>`
-- `:requirements <question>`
-- `:risks <question>`
-- `:deadlines <question>`
-- `:json <question>`
-- `:quit`
-
-You can also name or redirect the saved session:
-
-```bash
-mare chat --folder ./docs --session-name ops-manual-review
-mare chat --folder ./docs --session-file ./tmp/mare-session.json
-mare chat --folder ./docs --no-history
-```
-
-If the PDF filename is awkward, rename it first:
-
-```bash
-mv ./*.pdf ./manual.pdf
-mare ask ./manual.pdf "partially reinstall the set screws if they fall out"
-```
-
-## Benchmarking real corpora
-
-MARE now supports stack comparison in the eval harness so you can compare the built-in default against stronger advanced paths on the same corpus.
-
-Important:
-
-- the eval case files in `examples/` are included in the repo
-- the generated corpus JSON files in `generated/` are local artifacts, not something users should assume exists after a fresh clone or package install
-- before running the eval commands below, generate the corpus locally from the source PDF
-
-Example: generate a local corpus first:
-
-```bash
-mare ingest ./manual.pdf
-```
-
-Example: compare the built-in stack against hybrid semantic retrieval on a generated corpus:
-
-```bash
-PYTHONPATH=src python3 -m mare.eval \
-  --corpus generated/manual.json \
-  --eval ./my_eval_cases.json \
-  --stack builtin \
-  --stack hybrid-semantic
-```
-
-Generate a research paper corpus first from your own PDF file with a matching filename, or adjust the output path in the eval command:
-
-```bash
-mare ingest "./543_Thinking_with_Reasoning_Sk.pdf"
-```
-
-Example: compare on a research paper corpus:
-
-```bash
-PYTHONPATH=src python3 -m mare.eval \
-  --corpus generated/543_Thinking_with_Reasoning_Sk.json \
-  --eval examples/research_paper_eval_cases.json \
-  --stack builtin \
-  --stack hybrid-semantic
-```
-
-These example eval files are intentionally small and opinionated. They are meant to help you compare:
-
-- the default built-in retrieval path
-- the hybrid semantic path
-- whether semantic retrieval is actually improving grounded evidence on your PDFs
-- how MARE behaves across different PDF genres such as manuals and research papers
-
-If you are evaluating advanced retrieval stacks such as `hybrid-semantic`, install the matching extras first. For example:
-
-```bash
-pip install "mare-retrieval[sentence-transformers]"
-```
-
-## Public Python API
-
-The package is meant to be importable, not just runnable from scripts.
-
-```python
-from mare import MAREApp, load_corpus, load_document, load_pdf
-```
-
-Create an app from a document:
-
-```python
-app = load_document("guide.md", reuse=True)
-hit = app.best_match("what does MagSafe 3 refer to")
-```
-
-This is the core library shape MARE is optimizing around: something an agent or application can call to get grounded document evidence, not just an answer-shaped blob.
-
-Create an app from an existing JSON corpus:
-
-```python
-app = load_corpus("generated/manual.json")
-results = app.retrieve("how do I configure wake on lan", top_k=3)
-```
-
-Example: agent-style corpus inspection before final retrieval.
-
-```python
-app = load_corpus("generated/manual.json")
-summary = app.describe_corpus(page_limit=3, object_limit=2)
-candidate_objects = app.search_objects("wake on lan", object_type="section", limit=5)
-final_hits = app.retrieve("how do I configure wake on lan", top_k=3)
-```
-
-Example: query across multiple generated corpora while preserving the same evidence-first result shape.
-
-```python
-app = load_corpora(["generated/manual-a.json", "generated/manual-b.json"])
-best = app.best_match("where is wake on lan discussed", top_k=5)
-```
-
-Core methods:
-
-- `MAREApp.from_document(...)`
-- `MAREApp.from_pdf(...)`
-- `MAREApp.from_corpus(...)`
-- `MAREApp.from_corpora(...)`
-- `MAREApp.from_documents(...)`
-- `load_document(...)`
-- `load_pdf(...)`
-- `app.explain(query)`
-- `app.retrieve(query)`
-- `app.best_match(query)`
-- `app.describe_corpus()`
-- `app.search_objects(query, object_type=...)`
-
-Example: inspect the evidence corpus before asking a question.
-
-```python
-app = load_corpus("generated/manual.json")
-summary = app.describe_corpus(page_limit=3, object_limit=2)
-objects = app.search_objects("wake on lan", object_type="section", limit=5)
-```
-
-## Developer-friendly extension points
-
-MARE is designed to be usable out of the box, but it should also be easy to improve on a bigger machine or inside an existing AI stack.
-
-Today you can plug in:
-
-- a custom document parser
-- custom retriever factories per modality
-- a second-stage reranker
-
-That means developers can keep MARE's API and UI while swapping in stronger components.
-
-```python
-from pathlib import Path
-
-from mare import MAREApp, MAREConfig, Modality
-
-
-class MyParser:
-    def ingest(self, source_path: Path, output_path: Path) -> Path:
-        # Build a MARE-compatible corpus here using your preferred parser.
-        ...
-        return output_path
-
-
-class MyReranker:
-    def rerank(self, query, hits, top_k=5):
-        # Reorder fused hits using your favorite cross-encoder or API.
-        return hits[:top_k]
-
-
-class MyTextRetriever:
-    def __init__(self, documents):
-        self.documents = documents
-
-    def retrieve(self, query, top_k=5):
-        ...
-
-
-config = MAREConfig(
-    reranker=MyReranker(),
-    retriever_factories={
-        Modality.TEXT: lambda documents: MyTextRetriever(documents),
-    },
-)
-
-app = MAREApp.from_document("guide.md", parser=MyParser(), config=config)
-best = app.best_match("how do I configure wake on lan")
-```
-
-Built-in extension helpers:
-
-- `BuiltinPDFParser` for the default local pipeline
-- `BuiltinTextParser` for Markdown and text documents
-- `BuiltinDocxParser` for first-pass `.docx` ingestion
-- `DoclingParser` and `UnstructuredParser` for richer parsing stacks
-- `LangChain`, `LangGraph`, and `LlamaIndex` adapters for ecosystem-friendly retrieval
-- `PaddleOCRParser` and `SuryaParser` for OCR-first parsing on scanned or image-heavy PDFs
-- `FAISSIndexer` and `FAISSRetriever` for local vector retrieval without a running service
-- `SentenceTransformersRetriever` for drop-in semantic retrieval with Hugging Face models
-- `HybridSemanticRetriever` for the recommended advanced path that preserves MARE's lexical/object-aware evidence behavior and adds semantic lift
-- `FastEmbedReranker` for open-source cross-encoder reranking
-- `QdrantIndexer` for indexing MARE documents into a local or remote Qdrant collection
-- `QdrantHybridRetriever` for vector-backed retrieval on local or remote Qdrant collections
-- `IdentityReranker` as a no-op baseline
-- `KeywordBoostReranker` as a simple built-in reranker example
-
-Recommended upgrade paths for developers:
-
-- `Docling` for richer local document parsing, layout, OCR, and table structure
-- `Unstructured` for document partitioning and element extraction
-- `PaddleOCR` for lightweight OCR-first extraction on scanned pages
-- `Surya` for OCR plus layout-aware document parsing on harder scanned documents
-- `FastEmbed` for local dense and sparse embeddings
-- `FAISS` for fast local vector search with minimal setup
-- `Qdrant` for hybrid dense/sparse/multivector retrieval and reranking pipelines
-- `BGE-M3` for flexible dense + sparse retrieval setups
-- `ColPali` for page-image retrieval when visual structure matters
-
-MARE's job is to provide the retrieval framework and evidence-first UX. Better models and external systems should be able to plug into that foundation, not replace it.
-
-Install optional integrations when you need them:
-
-```bash
-pip install "mare-retrieval[docling]"
-pip install "mare-retrieval[faiss]"
-pip install "mare-retrieval[langchain]"
-pip install "mare-retrieval[langgraph]"
-pip install "mare-retrieval[llamaindex]"
-pip install "mare-retrieval[paddleocr]"
-pip install "mare-retrieval[sentence-transformers]"
-pip install "mare-retrieval[surya]"
-pip install "mare-retrieval[unstructured]"
-pip install "mare-retrieval[fastembed]"
-pip install "mare-retrieval[integrations]"
-```
-
-### New-user install advice
-
-If you want the smoothest first experience, install in layers instead of trying to pull every optional dependency at once.
-
-Good path:
-
-1. Core visual playground
-
-```bash
-pip install -e ".[ui]"
-```
-
-2. Advanced retrieval stack
-
-```bash
-pip install -e ".[sentence-transformers,faiss,langchain,langgraph,llamaindex,fastembed]"
-```
-
-3. Heavier parsing / OCR stacks only when you need them
-
-```bash
-pip install -e ".[unstructured]"
-pip install -e ".[docling]"
-pip install -e ".[paddleocr]"
-pip install -e ".[surya]"
-```
-
-This is more reliable than trying to install every heavy optional dependency in one shot.
-
-### Sentence-transformers note
-
-If you use the `Sentence Transformers` retriever in the Streamlit Playground, keep the environment healthy:
-
-- `numpy<2` is often the safer choice for mixed compiled dependencies
-- on some Macs, newer `torch` wheels may not be available, so a working combo can look like:
-  - `torch==2.2.2`
-  - `transformers==4.49.0`
-  - `sentence-transformers==3.4.1`
-- if you install heavier extras later, especially `docling`, they may upgrade `numpy` again; if the semantic retriever starts failing after that, re-pin:
-  - `pip install "numpy<2"`
-  - then reinstall the compatible torch stack if needed
-
-If Streamlit becomes noisy while inspecting `transformers`, run it with file watching disabled:
-
-```bash
-STREAMLIT_SERVER_FILE_WATCHER_TYPE=none PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
-```
-
-### What this means in practice
-
-On a small local machine, you can use MARE with the built-in parser and retrievers.
-
-On a bigger machine or inside a production stack, you can upgrade pieces independently:
-
-- swap the parser for `Docling` or `Unstructured`
-- swap the parser for OCR-first stacks like `PaddleOCRParser` or `SuryaParser` when PDFs are scanned
-- swap the text retriever for an embedding-backed retriever such as `SentenceTransformersRetriever`
-- add a local vector backend like `FAISS` when you want a stronger local stack
-- add a cross-encoder reranker
-- later plug in a vector backend like `Qdrant` and use `QdrantIndexer` to populate it
-
-That is the intended habit MARE should create:
-
-start simple, then improve the stack without changing the application-facing API.
-
-Example: use Unstructured for parsing and FastEmbed for reranking.
-
-```python
-from mare import FastEmbedReranker, MAREApp, MAREConfig, UnstructuredParser
-
-config = MAREConfig(
-    reranker=FastEmbedReranker(),
-)
-
-app = MAREApp.from_document(
-    "guide.docx",
-    parser=UnstructuredParser(strategy="hi_res"),
-    config=config,
-)
-
-best = app.best_match("show me the comparison table")
-```
-
-This keeps the same MARE API while letting developers improve parsing and ranking with open-source components.
-
-Example: use a sentence-transformers semantic retriever without changing the app API.
-
-```python
-from mare import MAREApp, MAREConfig, Modality, SentenceTransformersRetriever
-
-config = MAREConfig(
-    retriever_factories={
-        Modality.TEXT: lambda documents: SentenceTransformersRetriever(
-            documents,
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-        )
-    }
-)
-
-app = MAREApp.from_corpus("generated/manual.json", config=config)
-best = app.best_match("how do I connect the AC adapter")
-```
-
-This is a good default upgrade path when you want stronger semantic matching with widely used open-source models from the Hugging Face ecosystem.
-
-Example: index locally with FAISS, then retrieve through MARE.
-
-```python
-from mare import FAISSIndexer, FAISSRetriever, MAREApp, MAREConfig, Modality, load_corpus
-
-app = load_corpus("generated/manual.json")
-
-indexer = FAISSIndexer("generated/manual.faiss")
-indexer.index_documents(app.documents, recreate=True)
-
-config = MAREConfig(
-    retriever_factories={
-        Modality.TEXT: lambda documents: FAISSRetriever(
-            documents,
-            index_path="generated/manual.faiss",
-        )
-    }
-)
-
-faiss_app = MAREApp.from_corpus("generated/manual.json", config=config)
-best = faiss_app.best_match("how do I connect the AC adapter")
-```
-
-This is the easiest local “next step” after the built-in retriever when you want a stronger vector setup without running an external service.
-
-Example: plug MARE into LangChain or LangGraph as a retriever.
-
-```python
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-retriever = app.as_langchain_retriever(top_k=3)
-
-docs = retriever.invoke("how do I configure wake on lan")
-```
-
-Each returned LangChain document includes the usual content plus MARE metadata like `page`, `score`, `object_type`, `citation`, `page_image_path`, and `highlight_image_path`.
-
-If you want a richer tool-shaped payload instead of native LangChain `Document` objects, use:
-
-```python
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-tool = app.as_langchain_tool(top_k=3, name="mare_evidence")
-
-result = tool.invoke({"query": "how do I configure wake on lan"})
-```
-
-That returns the full MARE evidence payload with:
-
-- `results`
-- `comparison`
-- `summary`
-- `findings`
-- `review`
-
-Example: use MARE as a LangGraph-ready evidence tool.
-
-```python
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-tool = app.as_langgraph_tool(top_k=3)
-
-result = tool.invoke({"query": "how do I configure wake on lan"})
-```
-
-The tool returns structured evidence with page, snippet, citation, highlight path when available, and metadata, which fits naturally into agent/tool workflows where the LLM needs grounded retrieval output instead of a plain text blob.
-
-Example: plug MARE into LlamaIndex as a retriever.
-
-```python
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-retriever = app.as_llamaindex_retriever(top_k=3)
-
-results = retriever.retrieve("how do I configure wake on lan")
-```
-
-This gives you `NodeWithScore` results built from MARE evidence hits, so the surrounding LlamaIndex workflow can keep using its native abstractions.
-
-If you want the richer MARE evidence payload in a tool form instead, use:
-
-```python
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-tool = app.as_llamaindex_tool(top_k=3, name="mare_evidence")
-
-result = tool(query="how do I configure wake on lan")
-```
-
-That returns the same structured MARE payload with `results`, `comparison`, and `summary`.
-
-## MCP server for agents
-
-If you want agents outside Python to call MARE as a reusable tool layer, MARE now includes a first MCP server surface.
-
-Which interface should you use?
-
-- `mare-ui`: best for human evaluation, demos, and visual proof inspection
-- `mare-workflow`: best for enterprise evaluation, backend prototyping, and agent-style structured output from a terminal
-- `mare-mcp`: best when you already have an MCP-capable client or agent platform and want MARE as a tool server
-
-Install:
-
-```bash
-pip install "mare-retrieval[mcp]"
-```
-
-Run with a local MCP client over stdio:
-
-```bash
-mare mcp
-```
-
-Note: `mare mcp` is a stdio MCP server. It is meant to be launched by an MCP-capable client over stdin/stdout, not interacted with directly in a shell prompt.
-
-Run as a remote MCP endpoint over HTTP:
-
-```bash
-mare mcp --transport http --host 0.0.0.0 --port 8000
-```
-
-That serves a remote MCP endpoint at:
-
-```text
-http://127.0.0.1:8000/mcp/
-```
-
-This is the mode to use when you want to deploy MARE behind a load balancer, connect it to ChatGPT/API MCP tools, or evaluate it like an enterprise service.
-
-If you want a human-friendly local evaluation flow with the same agent-style steps, use:
-
-```bash
-mare-workflow --document guide.md --query "how do I configure wake on lan"
-```
-
-For a terminal-first evaluation over a whole folder of mixed documents:
-
-```bash
-mare-workflow --folder ./examples/mixed_docs --query "how do I connect the AC adapter"
-```
-
-Or return a structured agent payload:
-
-```bash
-mare-workflow \
-  --document guide.md \
-  --query "how do I configure wake on lan" \
-  --format json
-```
-
-Or point an MCP-capable client at the included example stdio config:
-
-```json
-{
-  "mcpServers": {
-    "mare": {
-      "command": "mare",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-See [examples/mcp_stdio_config.json](/Users/saisandeepkantareddy/Downloads/MARE/examples/mcp_stdio_config.json).
-
-For remote MCP clients, use the HTTP endpoint directly:
-
-```text
-http://your-host:8000/mcp/
-```
-
-The MCP server exposes focused tools for the evidence layer:
-
-- `ingest_document`
-- `ingest_pdf`
-- `ingest_pdf_url`
-- `query_document`
-- `query_pdf`
-- `query_pdf_url`
-- `query_corpus`
-- `query_corpora`
-- `page_objects`
-- `describe_corpus`
-- `search_objects`
-
-These tools return structured MARE-shaped payloads with grounded evidence such as:
-
-- `page`
-- `citation`
-- `snippet`
-- `highlight_image_path`
-- `object_type`
-- `reason`
-
-This is the intended agent architecture:
-
-```text
-user -> agent -> MARE MCP tool -> page + citation + snippet + highlight + proof
-```
-
-So MARE stays the document evidence layer, while the agent keeps responsibility for planning, orchestration, and final response generation.
-
-Typical flow for an agent builder:
-
-1. Install the MCP extra:
-
-```bash
-pip install "mare-retrieval[mcp]"
-```
-
-2. Register `mare mcp` in your MCP-capable client using the example config above.
-
-3. Have your agent call:
-   - `describe_corpus` first when it needs to understand what pages, signals, and object types exist in the corpus
-   - `query_document` when it has a local document path and needs grounded evidence directly
-   - `query_pdf` when it has a PDF path and needs grounded evidence directly
-   - `query_pdf_url` when the PDF is reachable by URL but not on the same filesystem as the MARE server
-   - `query_corpus` when the document was already ingested and you want faster repeated retrieval
-   - `query_corpora` when the agent needs to search across a set of documents and still get page/snippet/highlight proof back
-   - `page_objects` when the agent needs to inspect extracted procedures, sections, figures, or tables on one page
-   - `search_objects` when the agent wants to browse extracted evidence objects before doing a final retrieval pass
-
-4. Use the returned payload to answer with evidence:
-   - `page`
-   - `citation`
-   - `snippet`
-   - `highlight_image_path`
-   - `object_type`
-   - `reason`
-
-When connecting MARE to remote app platforms such as ChatGPT Create App, prefer:
-
-- `query_document` for local document paths when the server can already see the file
-- `query_pdf_url` for files the platform can expose as public or signed URLs
-- `query_corpus` / `query_corpora` for corpora already generated on the MARE server
-
-Avoid plain `query_pdf` in those cases unless the PDF path is on the same filesystem as the running MARE server.
-
-Example: run the full agent-style workflow locally against a corpus:
-
-```bash
-mare-workflow \
-  --corpus generated/manual.json \
-  --query "how do I configure wake on lan" \
-  --object-query "wake on lan" \
-  --object-type section
-```
-
-Example: run multi-PDF retrieval across a corpus set:
-
-```bash
-mare-workflow \
-  --corpus generated/manual-a.json \
-  --corpus generated/manual-b.json \
-  --query "where is wake on lan discussed"
-```
-
-Example tool result shape:
-
-```json
-{
-  "query": "how do I connect the AC adapter",
-  "results": [
-    {
-      "page": 10,
-      "snippet": "Connect the AC adapter to the laptop.",
-      "highlight_image_path": "generated/manual/highlights/page-10-abc123.png",
-      "object_type": "procedure",
-      "reason": "lexical:Matched text terms: adapter | semantic:sentence-transformers semantic match via sentence-transformers/all-MiniLM-L6-v2"
-    }
-  ]
-}
-```
-
-Example: plug MARE into LlamaIndex as a retriever.
-
-```python
-from llama_index.core.schema import QueryBundle
-from mare import MAREApp
-
-app = MAREApp.from_corpus("generated/manual.json")
-retriever = app.as_llamaindex_retriever(top_k=3)
-
-nodes = retriever.retrieve(QueryBundle("how do I connect the AC adapter"))
-```
-
-This gives you `NodeWithScore` results built from MARE evidence hits, so the surrounding LlamaIndex workflow can keep using its native abstractions.
-
-Example: use Docling for richer document parsing.
-
-```python
-from mare import DoclingParser, MAREApp
-
-app = MAREApp.from_pdf(
-    "manual.pdf",
-    parser=DoclingParser(),
-)
-
-best = app.best_match("how do I configure wake on lan")
-```
-
-Docling is especially promising when you want stronger OCR, layout, and table/figure extraction while still keeping the MARE API unchanged.
-
-Example: use PaddleOCR for scanned PDFs where text extraction is weak.
-
-```python
-from mare import MAREApp, PaddleOCRParser
-
-app = MAREApp.from_pdf(
-    "scanned-manual.pdf",
-    parser=PaddleOCRParser(lang="en"),
-)
-
-best = app.best_match("what does this warning label say")
-```
-
-This is a good fit when the document is primarily scan-based and you want a lightweight OCR-first path.
-
-Example: use Surya for OCR plus layout-aware extraction on harder scanned documents.
-
-```python
-from mare import MAREApp, SuryaParser
-
-app = MAREApp.from_pdf(
-    "scanned-manual.pdf",
-    parser=SuryaParser(),
-)
-
-best = app.best_match("show me the table with configuration settings")
-```
-
-Surya is especially promising when you want OCR plus layout signals like section headers, figures, and tables from scanned or camera-captured pages.
-
-Example: keep MARE's app surface, but swap retrieval to Qdrant.
-
-```python
-from mare import MAREApp, MAREConfig, Modality, QdrantHybridRetriever
-
-config = MAREConfig(
-    retriever_factories={
-        Modality.TEXT: lambda documents: QdrantHybridRetriever(
-            documents,
-            collection_name="mare-docs",
-            url="http://localhost:6333",
-            vector_name="text",
-        )
-    }
-)
-
-app = MAREApp.from_corpus("generated/manual.json", config=config)
-best = app.best_match("how do I connect the AC adapter")
-```
-
-Expected Qdrant payload fields:
-
-- `doc_id`
-- `title`
-- `page`
-- `text` or `snippet`
-- optional: `page_image_path`, `highlight_image_path`, `object_id`, `object_type`, `metadata`
-
-Example: index a MARE corpus into Qdrant before using the hybrid retriever.
-
-```python
-from mare import QdrantIndexer, load_corpus
-
-documents = load_corpus("generated/manual.json")
-
-indexer = QdrantIndexer(
-    collection_name="mare-docs",
-    url="http://localhost:6333",
-    vector_name="text",
-)
-indexer.index_documents(documents, recreate=True)
-```
-
-By default, `QdrantIndexer` uses a sentence-transformers embedder. Developers can swap in their own embedder callable if they already have a preferred model or service.
-
-A complete advanced-stack example is available in:
-
-- `examples/advanced_stack.py`
-
-It supports combinations like:
-
-- built-in / Docling / Unstructured parsing
-- sentence-transformers semantic retrieval
-- Qdrant indexing plus Qdrant-backed retrieval
-- FastEmbed reranking
-- LangChain document output
-- LangGraph-ready tool output
-- LlamaIndex node output
-
-Example:
-
-```bash
-PYTHONPATH=src python3 examples/advanced_stack.py \
-  --corpus generated/manual.json \
-  --query "how do I configure wake on lan" \
-  --semantic \
-  --reranker fastembed
-```
-
-Or, if you want a more production-like path:
-
-```bash
-PYTHONPATH=src python3 examples/advanced_stack.py \
-  --pdf manual.pdf \
-  --parser docling \
-  --query "show me the comparison table" \
-  --qdrant-url http://localhost:6333 \
-  --qdrant-collection mare-docs \
-  --index-qdrant \
-  --use-qdrant
-```
-
-## Packaging and release
-
-MARE is now structured as a regular Python package with:
-
-- `pyproject.toml` metadata
-- legacy-friendly `setup.py`
-- console entry points
-- a PyPI publishing workflow
-
-Release notes and PyPI steps live in `PUBLISHING.md`.
-
-## Visual demo
-
-If you want to show this to users visually, run the Streamlit demo:
-
-```bash
-pip install -e ".[ui]"
-PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
-```
-
-If you use the `Sentence Transformers` option in Advanced mode and Streamlit starts emitting transformer watcher noise, prefer:
-
-```bash
-STREAMLIT_SERVER_FILE_WATCHER_TYPE=none PYTHONPATH=src python -m streamlit run src/mare/streamlit_app.py
-```
-
-The demo lets a user:
-
-- upload documents
-- ask a question
-- see the best matching page/region and object type
-- read the exact evidence snippet
-- view the citation
-- view the rendered page image when available
-- view the highlighted evidence image when available
-- inspect extracted objects on the best page
-
-The Streamlit app is the easiest way to explore MARE visually.
-The Python package is where developers get full control over:
-
-- custom parsers
-- custom retrievers
-- vector backends
-- rerankers
-- framework integrations
-- evaluation harnesses
-
-For non-text objects such as tables and figures, MARE now falls back to object-region highlighting when exact text-span highlighting is not available yet.
-Newly ingested corpora capture richer line-span metadata for built-in objects, and parser adapters such as Surya can pass bounding boxes directly, so highlight precision is tighter on fresh corpora than on older generated artifacts.
-
-The technical retrieval plan is hidden under a `Debug details` expander so the default experience stays user-facing.
-
-## Ingest a real PDF
-
-You can convert a PDF into a page-level JSON corpus and then run retrieval on it.
-
-```bash
+git clone https://github.com/mare-retrieval/MARE.git
+cd MARE
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-mare-ingest "./manual.pdf"
-mare-demo --corpus "generated/manual.json" --query "what does this document say about setup?"
+pytest
 ```
 
-Without installing the package first:
+Useful developer entrypoints:
 
-```bash
-PYTHONPATH=src python3 -m mare.ingest "./manual.pdf"
-PYTHONPATH=src python3 -m mare.demo --corpus "generated/manual.json" --query "what does this document say about setup?"
+- [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)
+- [examples/evidence_brief_demo.py](./examples/evidence_brief_demo.py)
+- [examples/mixed_docs_workflow.py](./examples/mixed_docs_workflow.py)
+- `examples/developer_playground.ipynb`
+
+## Architecture
+
+```text
+query
+  -> modality routing
+  -> page/object retrieval
+  -> lexical, phrase, structure, and object-aware scoring
+  -> optional semantic retrieval and reranking
+  -> score fusion
+  -> snippet and evidence selection
+  -> proof rendering when available
+  -> Evidence Brief and structured payloads
 ```
 
-What the ingest step does right now:
+Core modules:
 
-- reads each PDF page with `pypdf`
-- renders each PDF page to `generated/<pdf-name>/page-N.png`
-- extracts page text
-- creates one retrieval document per page
-- extracts lightweight document objects such as procedures and sections
-- writes a JSON corpus that the retriever can search immediately
+- `src/mare/engine.py`
+- `src/mare/router.py`
+- `src/mare/fusion.py`
+- `src/mare/retrievers/text.py`
+- `src/mare/integrations.py`
+- `src/mare/workflow.py`
+- `src/mare/mcp_server.py`
 
-This is still a practical baseline, not a full parsing stack. OCR-heavy documents, richer figure extraction, and stronger layout modeling are next steps.
+## Current Limits
 
-## What you get back
+MARE is strongest today on text-bearing PDFs and local mixed-document folders. These areas are still early:
 
-The retriever now returns:
-
-- the matching page number
-- why that page matched
-- a short exact snippet from the page text
-- the rendered page image path
-- a highlighted evidence image when text spans can be located on the page
-- the best matching object type when object-aware retrieval is used
-
-That makes it easier to validate whether retrieval found the right instruction and jump to the exact page image.
-
-Example output:
-
-```json
-{
-  "query": "how do I connect the AC adapter",
-  "intent": "semantic_lookup",
-  "selected_modalities": ["text"],
-  "discarded_modalities": ["image", "layout"],
-  "confidence": 0.7,
-  "rationale": "Detected modality cues in query tokens. Selected text based on keyword overlap with routing hints.",
-  "results": [
-    {
-      "doc_id": "manual-p13",
-      "title": "Manual",
-      "page": 13,
-      "score": 1.0,
-      "object_type": "procedure",
-      "reason": "Best object: procedure | phrase match x2",
-      "snippet": "2 Connect the AC adapter to the DC jack of the computer."
-    }
-  ]
-}
-```
-
-## Why the explainability matters
-
-The debug surface is a core feature, not an afterthought. For retrieval systems that support real work, we need to answer:
-
-- Why did this page rank highly?
-- Which object matched best?
-- Why was a result returned instead of another nearby page?
-- When should the system return no result?
-
-That is the wedge for MARE: make retrieval inspectable before trying to make it magical.
-
-## Evaluation Harness
-
-MARE now includes a lightweight evaluation harness so we can measure retrieval quality instead of guessing.
-
-It supports:
-
-- page hit rate
-- document hit rate
-- object hit rate
-- no-result correctness
-
-Run it with:
-
-```bash
-mare-eval --corpus examples/sample_corpus.json --eval examples/eval_cases.json
-```
-
-Or from source:
-
-```bash
-PYTHONPATH=src python3 -m mare.eval --corpus examples/sample_corpus.json --eval examples/eval_cases.json
-```
-
-The evaluation file is simple JSON:
-
-```json
-{
-  "cases": [
-    {
-      "query": "show me the architecture diagram",
-      "expected_doc_id": "paper-hyde-p3",
-      "expected_page": 3,
-      "expected_object_type": "figure",
-      "top_k": 3
-    },
-    {
-      "query": "show me a nonexistent appendix table",
-      "expect_no_result": true,
-      "top_k": 3
-    }
-  ]
-}
-```
-
-This is useful both for library developers and for teams evaluating their own parser/retriever/reranker combinations on top of MARE.
-
-## Local sample data
-
-`examples/sample_corpus.json` contains a tiny corpus so the retrieval flow is runnable out of the box.
+- scanned or camera-captured documents without OCR extras
+- table and figure reasoning beyond lightweight object extraction
+- deep contradiction analysis beyond deterministic conflict-language hints
+- learned multimodal routing
 
 ## Roadmap
 
-Near term:
+Near-term priorities:
 
-- better figure extraction
-- stronger table extraction
-- cleaner object segmentation on large manuals
-- better highlighted evidence localization
-
-Next layer:
-
-- hybrid retrieval backends
-- embedding and reranking adapters
-- LangChain and LlamaIndex integrations
-- agent-friendly interfaces
-
-Longer term:
-
-- richer layout-aware retrieval
-- benchmark harness for evidence-first document retrieval
-- more robust modality-aware routing
+- stronger hybrid retrieval defaults
+- tighter snippets and highlights
+- better source diversity and contradiction analysis
+- weak-support query rewriting
+- evidence evaluation for retrieval quality
+- stronger table/layout proof
+- clearer agent integration recipes
 
 ## License
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from mare import MAREApp, load_corpora, load_corpus, load_document
+from mare.extensions import MAREConfig
 from mare.types import Document
 
 
@@ -69,3 +70,39 @@ def test_load_document_supports_markdown_input(tmp_path: Path) -> None:
     procedure_objects = app.search_objects("connect the adapter", object_type="procedure", limit=5)
     assert procedure_objects
     assert procedure_objects[0]["metadata"]["heading"] == "Setup"
+
+
+def test_load_document_uses_resolved_runtime_config_by_default(monkeypatch) -> None:
+    resolved_config = MAREConfig()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("mare.api.resolve_runtime_config", lambda config=None: resolved_config)
+
+    def _fake_from_document(**kwargs):
+        captured.update(kwargs)
+        return "app"
+
+    monkeypatch.setattr("mare.api.MAREApp.from_document", _fake_from_document)
+
+    result = load_document("guide.md")
+
+    assert result == "app"
+    assert captured["config"] is resolved_config
+
+
+def test_load_document_preserves_explicit_config(monkeypatch) -> None:
+    explicit_config = MAREConfig()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("mare.api.resolve_runtime_config", lambda config=None: config)
+
+    def _fake_from_document(**kwargs):
+        captured.update(kwargs)
+        return "app"
+
+    monkeypatch.setattr("mare.api.MAREApp.from_document", _fake_from_document)
+
+    result = load_document("guide.md", config=explicit_config)
+
+    assert result == "app"
+    assert captured["config"] is explicit_config

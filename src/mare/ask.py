@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from mare.api import load_pdf
+from mare.workflow import _build_support_assessment
 
 
 def _default_output_path(pdf_path: Path) -> Path:
@@ -20,9 +21,13 @@ def _print_answer_block(query: str, corpus_path: Path, explanation) -> None:
         return
 
     best = explanation.fused_results[0]
+    support = _build_support_assessment(explanation)
     print("Best Match")
+    config = getattr(getattr(explanation, "app", None), "config", None)
     print(f"Page: {best.page}")
     print(f"Score: {best.score}")
+    print(f"Support: {support['label']}")
+    print(f"Support note: {support['message']}")
     print(f"Reason: {best.reason}")
     print(f"Object type: {best.object_type or '[page]'}")
     print(f"Snippet: {best.snippet or '[no snippet available]'}")
@@ -33,6 +38,7 @@ def _print_answer_block(query: str, corpus_path: Path, explanation) -> None:
 def ask_pdf(pdf_path: Path, query: str, top_k: int = 3, reuse: bool = False):
     app = load_pdf(pdf_path=pdf_path, output_path=_default_output_path(pdf_path), reuse=reuse)
     explanation = app.explain(query, top_k=top_k)
+    setattr(explanation, "app", app)
     output_path = app.corpus_path or _default_output_path(pdf_path)
     return output_path, explanation
 

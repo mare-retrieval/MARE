@@ -6,6 +6,7 @@ import types
 from mare import MAREApp
 from mare.integrations import (
     build_all_grounded_findings_payload,
+    build_evidence_brief_payload,
     build_grounded_findings_payload,
     build_grounded_review_payload,
     build_grounded_summary_payload,
@@ -86,6 +87,10 @@ def test_hits_to_evidence_payload_preserves_result_fields() -> None:
     assert payload["comparison"][1]["citation"] == "guide.docx | page 62 | Wake on LAN"
     assert payload["summary"]["overview"] == "Found 2 grounded results across 2 sources."
     assert payload["summary"]["highlights"][1]["citation"] == "guide.docx | page 62 | Wake on LAN"
+    assert payload["evidence_brief"]["support"]["status"] == "strong"
+    assert payload["evidence_brief"]["source_count"] == 2
+    assert payload["evidence_brief"]["source_diversity"]["status"] == "broad"
+    assert payload["review"]["evidence_brief"]["overview"].startswith("Strong support")
 
 
 def test_build_grounded_summary_payload_handles_no_results() -> None:
@@ -94,6 +99,65 @@ def test_build_grounded_summary_payload_handles_no_results() -> None:
     assert payload["overview"] == "No grounded evidence found."
     assert payload["highlight_count"] == 0
     assert payload["highlights"] == []
+
+
+def test_build_evidence_brief_payload_flags_gaps_and_next_questions() -> None:
+    results = [
+        {
+            "citation": "manual.pdf | page 4",
+            "title": "Manual",
+            "page": 4,
+            "score": 0.52,
+            "object_type": "section",
+            "snippet": "Connect the AC adapter before powering on.",
+            "reason": "Matched setup wording",
+            "metadata": {"source": "manual.pdf"},
+            "page_image_path": "",
+            "highlight_image_path": "",
+        }
+    ]
+
+    brief = build_evidence_brief_payload("connect the adapter", results)
+
+    assert brief["support"]["status"] == "weak"
+    assert brief["source_documents"] == ["manual.pdf"]
+    assert brief["source_diversity"]["status"] == "single_source"
+    assert "snippet" in brief["available_proof_assets"]
+    assert any("highlighted visual proof" in gap for gap in brief["evidence_gaps"])
+    assert brief["next_questions"]
+
+
+def test_build_evidence_brief_payload_detects_conflict_hints() -> None:
+    results = [
+        {
+            "citation": "policy.pdf | page 2",
+            "title": "Policy",
+            "page": 2,
+            "score": 0.82,
+            "object_type": "section",
+            "snippet": "Employees must submit the acknowledgement before onboarding is complete.",
+            "reason": "Matched requirement language",
+            "metadata": {"source": "policy.pdf"},
+        },
+        {
+            "citation": "faq.md | lines 8-9",
+            "title": "FAQ",
+            "page": 1,
+            "score": 0.76,
+            "object_type": "section",
+            "snippet": "The acknowledgement is optional when onboarding is already complete.",
+            "reason": "Matched optional language",
+            "metadata": {"source": "faq.md"},
+        },
+    ]
+
+    brief = build_evidence_brief_payload("is the acknowledgement required", results)
+
+    assert brief["source_diversity"]["status"] == "broad"
+    assert brief["conflict_hints"][0]["type"] == "requirement_vs_optional"
+    assert "Potentially conflicting evidence signals" in brief["evidence_gaps"][0] or any(
+        "Potentially conflicting evidence signals" in gap for gap in brief["evidence_gaps"]
+    )
 
 
 def test_build_grounded_findings_payload_extracts_actions_and_requirements() -> None:

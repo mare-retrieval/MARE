@@ -8,7 +8,7 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 setup(
     name="mare-retrieval",
     version="0.4.4",
-    description="Grounded document evidence engine for developers and agents that returns inspectable answers with citations, snippets, highlights, and proof.",
+    description="Grounded document evidence engine for agents and developers that returns citations, snippets, highlights, source coverage, support strength, conflict hints, evidence gaps, and next questions.",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Sai Sandeep Kantareddy",

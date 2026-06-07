@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from mare.api import MAREApp, load_corpora, load_corpus, load_document
-from mare.integrations import build_all_grounded_findings_payload, build_grounded_review_payload, build_grounded_summary_payload, format_evidence_citation
+from mare.integrations import (
+    build_all_grounded_findings_payload,
+    build_evidence_brief_payload,
+    build_grounded_review_payload,
+    build_grounded_summary_payload,
+    format_evidence_citation,
+)
 
 
 _SKIP_DIR_NAMES = {
@@ -275,12 +281,14 @@ def _build_workflow_payload(
     comparison = _build_comparison_view(retrieval_results)
     grounded_summary = build_grounded_summary_payload(retrieval_results)
     findings = build_all_grounded_findings_payload(retrieval_results)
+    evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
     review = build_grounded_review_payload(
         retrieval_results,
         comparison=comparison,
         summary=grounded_summary,
         findings=findings,
         support=support,
+        evidence_brief=evidence_brief,
     )
 
     return {
@@ -318,6 +326,7 @@ def _build_workflow_payload(
                 "comparison": comparison,
                 "summary": grounded_summary,
                 "findings": findings,
+                "evidence_brief": evidence_brief,
                 "review": review,
                 "support": support,
             },
@@ -359,6 +368,7 @@ def _print_pretty(payload: dict[str, Any]) -> None:
     results = query_step["results"]
     comparison = query_step.get("comparison", [])
     summary = query_step.get("summary", {})
+    evidence_brief = query_step.get("evidence_brief", {})
 
     print("MARE Agent Workflow")
     print("")
@@ -411,6 +421,14 @@ def _print_pretty(payload: dict[str, Any]) -> None:
         print(f"Support: {support['label']}")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    if evidence_brief.get("overview"):
+        print(f"Evidence brief: {evidence_brief['overview']}")
+    gaps = evidence_brief.get("evidence_gaps") or []
+    if gaps:
+        print(f"Evidence gaps: {gaps[0]}")
+    next_questions = evidence_brief.get("next_questions") or []
+    if next_questions:
+        print(f"Next question: {next_questions[0]}")
 
     best = results[0]
     source_document = best.get("metadata", {}).get("source", "")
@@ -461,10 +479,17 @@ def _print_review(payload: dict[str, Any]) -> None:
     print(f"Review query: {query_step['query']}")
     print(review.get("overview") or "No grounded review available.")
     support = review.get("support") or {}
+    evidence_brief = review.get("evidence_brief") or query_step.get("evidence_brief") or {}
     if support.get("label"):
         print(f"Support: {support['label']}")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    if evidence_brief.get("overview"):
+        print(f"Evidence brief: {evidence_brief['overview']}")
+    for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
+        print(f"Evidence gap {index}: {item}")
+    for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
+        print(f"Next question {index}: {item}")
     if best.get("citation"):
         print(f"Primary citation: {best['citation']}")
     if best.get("snippet"):
@@ -481,6 +506,30 @@ def _print_review(payload: dict[str, Any]) -> None:
         print("Highlights")
         for index, item in enumerate(highlights, start=1):
             print(f"{index}. {item}")
+    print("")
+
+
+def _print_evidence_brief(payload: dict[str, Any]) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    evidence_brief = query_step.get("evidence_brief", {})
+    support = evidence_brief.get("support") or {}
+    print(f"Evidence brief query: {query_step['query']}")
+    print(evidence_brief.get("overview") or "No evidence brief available.")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
+    sources = evidence_brief.get("source_documents") or []
+    print(f"Sources: {', '.join(sources) if sources else '[none]'}")
+    source_diversity = evidence_brief.get("source_diversity") or {}
+    if source_diversity.get("label"):
+        print(f"Source coverage: {source_diversity['label']}")
+    proof_assets = evidence_brief.get("available_proof_assets") or []
+    print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
+    for index, item in enumerate(evidence_brief.get("conflict_hints") or [], start=1):
+        print(f"Conflict hint {index}: {item.get('message') or '[no message]'}")
+    for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
+        print(f"Evidence gap {index}: {item}")
+    for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
+        print(f"Next question {index}: {item}")
     print("")
 
 
@@ -562,7 +611,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--task",
-        choices=("answer", "review", "compare", "summary", "actions", "requirements", "risks", "deadlines"),
+        choices=("answer", "brief", "review", "compare", "summary", "actions", "requirements", "risks", "deadlines"),
         default="answer",
         help="Optional user-facing task view to print in pretty mode. JSON output always includes the full payload.",
     )
@@ -603,6 +652,9 @@ def main() -> None:
         )
     if args.format == "json":
         print(json.dumps(payload, indent=2))
+        return
+    if args.task == "brief":
+        _print_evidence_brief(payload)
         return
     if args.task == "review":
         _print_review(payload)

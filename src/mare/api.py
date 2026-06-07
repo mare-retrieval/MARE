@@ -7,7 +7,7 @@ from typing import Any
 
 from mare.demo import load_documents
 from mare.engine import MAREngine
-from mare.extensions import DocumentParser, MAREConfig, get_parser
+from mare.extensions import DocumentParser, MAREConfig, get_parser, resolve_runtime_config
 from mare.types import Document, DocumentObject, RetrievalExplanation, RetrievalHit
 
 
@@ -305,11 +305,11 @@ def _resolve_parser(source_path: Path, parser: str | DocumentParser) -> Document
 
 
 def load_corpus(corpus_path: str | Path, config: MAREConfig | None = None) -> MAREApp:
-    return MAREApp.from_corpus(corpus_path, config=config)
+    return MAREApp.from_corpus(corpus_path, config=resolve_runtime_config(config))
 
 
 def load_corpora(corpus_paths: list[str | Path], config: MAREConfig | None = None) -> MAREApp:
-    return MAREApp.from_corpora(corpus_paths, config=config)
+    return MAREApp.from_corpora(corpus_paths, config=resolve_runtime_config(config))
 
 
 def load_pdf(
@@ -319,7 +319,13 @@ def load_pdf(
     parser: str | DocumentParser | None = None,
     config: MAREConfig | None = None,
 ) -> MAREApp:
-    return MAREApp.from_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser, config=config)
+    return MAREApp.from_pdf(
+        pdf_path=pdf_path,
+        output_path=output_path,
+        reuse=reuse,
+        parser=parser,
+        config=resolve_runtime_config(config),
+    )
 
 
 def load_document(
@@ -334,5 +340,5 @@ def load_document(
         output_path=output_path,
         reuse=reuse,
         parser=parser,
-        config=config,
+        config=resolve_runtime_config(config),
     )

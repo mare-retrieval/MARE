@@ -360,6 +360,21 @@ def test_run_chat_supports_review_command(monkeypatch, capsys) -> None:
     assert "Findings: actions=2, requirements=0, risks=0, deadlines=1" in output
 
 
+def test_run_chat_supports_brief_command(monkeypatch, capsys) -> None:
+    answers = iter([":brief connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Evidence brief query: connect the adapter" in output
+    assert "Strong support from 2 retrieved results across 1 source." in output
+    assert "Sources: manual.pdf" in output
+    assert "Source coverage: Single-source coverage" in output
+    assert "Proof assets: snippet, citation, page_image, highlight" in output
+    assert "Next question 1:" in output
+
+
 def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:
     answers = iter(["how do I connect the AC adapter", ":history", ":quit"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))

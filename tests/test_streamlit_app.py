@@ -9,6 +9,7 @@ from mare.streamlit_app import (
     _clear_ui_session_history,
     _load_ui_session_history,
     _render_grounded_findings,
+    _render_evidence_brief,
     _render_getting_started,
     _render_review_snapshot,
     _resolve_retriever_choice,
@@ -236,6 +237,57 @@ def test_render_grounded_findings_handles_empty_payload() -> None:
 
     assert ("subheader", "Grounded Findings") in calls
     assert ("caption", "No grounded findings are available for this run.") in calls
+
+
+def test_render_evidence_brief_shows_trust_snapshot() -> None:
+    calls = []
+
+    class _Column:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeStreamlit:
+        @staticmethod
+        def subheader(body):
+            calls.append(("subheader", body))
+
+        @staticmethod
+        def markdown(body, unsafe_allow_html=False):
+            calls.append(("markdown", body, unsafe_allow_html))
+
+        @staticmethod
+        def columns(count):
+            calls.append(("columns", count))
+            return [_Column() for _ in range(count)]
+
+        @staticmethod
+        def caption(body):
+            calls.append(("caption", body))
+
+    _render_evidence_brief(
+        _FakeStreamlit(),
+        {
+            "overview": "Strong support from 2 retrieved results across 2 sources.",
+            "support": {"label": "Strong support"},
+            "source_diversity": {"label": "Broad source coverage"},
+            "source_documents": ["manual.pdf", "guide.docx"],
+            "available_proof_assets": ["snippet", "citation"],
+            "evidence_gaps": ["No obvious evidence gaps detected in the retrieved results."],
+            "next_questions": ["Show the exact procedure evidence from manual.pdf."],
+            "conflict_hints": [
+                {"message": "Retrieved evidence mixes requirement and optional language; compare the cited sources before acting."}
+            ],
+        },
+    )
+
+    assert ("subheader", "Evidence Brief") in calls
+    assert any(call[0] == "markdown" and "Trust Snapshot" in call[1] for call in calls)
+    assert any(call[0] == "markdown" and "Broad source coverage" in call[1] for call in calls)
+    assert any(call[0] == "caption" and "requirement and optional" in call[1] for call in calls)
+    assert any(call[0] == "caption" and "exact procedure" in call[1] for call in calls)
 
 
 def test_render_review_snapshot_shows_review_overview() -> None:

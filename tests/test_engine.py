@@ -146,3 +146,26 @@ def test_figure_queries_prefer_figure_object_evidence() -> None:
 
     assert explanation.fused_results[0].doc_id == "1"
     assert explanation.fused_results[0].object_type == "figure"
+
+
+def test_paraphrased_queries_match_instruction_text_via_aliases() -> None:
+    docs = [
+        Document(
+            doc_id="1",
+            title="Setup",
+            page=7,
+            text="Connect the adapter to the laptop before turning it on.",
+        ),
+        Document(
+            doc_id="2",
+            title="Background",
+            page=8,
+            text="Adapters are optional accessories for legacy devices.",
+        ),
+    ]
+
+    engine = MAREngine(docs)
+    explanation = engine.explain("how do I attach the adapter", top_k=2)
+
+    assert explanation.fused_results[0].doc_id == "1"
+    assert "alias matches" in explanation.fused_results[0].reason.lower()

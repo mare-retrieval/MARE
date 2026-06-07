@@ -10,6 +10,7 @@ from mare.workflow import (
     _default_output_path,
     _discover_folder_inputs,
     _load_app,
+    _print_evidence_brief,
     _print_findings,
     _print_review,
     _print_pretty,
@@ -175,6 +176,8 @@ def test_build_workflow_payload_returns_agent_shape() -> None:
     assert payload["steps"]["query_corpus"]["review"]["best_evidence"]["citation"] == "manual.pdf | page 10"
     assert payload["steps"]["query_corpus"]["retriever"]["label"] == "Hybrid semantic + lexical"
     assert payload["steps"]["query_corpus"]["support"]["status"] == "strong"
+    assert payload["steps"]["query_corpus"]["evidence_brief"]["source_count"] == 2
+    assert payload["steps"]["query_corpus"]["review"]["evidence_brief"]["support"]["status"] == "strong"
 
 
 def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
@@ -196,6 +199,8 @@ def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
     assert "Grounded Retrieval" in output
     assert "Retriever: Hybrid semantic + lexical" in output
     assert "Support: Strong support" in output
+    assert "Evidence brief: Strong support from 2 retrieved results across 2 sources." in output
+    assert "Next question:" in output
     assert "Summary: Found 2 grounded results across 2 sources." in output
     assert "Citation: manual.pdf | page 10" in output
     assert "Highlight:" in output
@@ -239,7 +244,31 @@ def test_print_review_shows_review_view(capsys) -> None:
     assert "Review query: connect the adapter" in output
     assert "Grounded review assembled from the best supporting evidence." in output
     assert "Primary citation: manual.pdf | page 10" in output
+    assert "Evidence brief: Strong support from 2 retrieved results across 2 sources." in output
+    assert "Next question 1:" in output
     assert "Findings: actions=2, requirements=0, risks=0, deadlines=1" in output
+
+
+def test_print_evidence_brief_shows_trust_view(capsys) -> None:
+    payload = _build_workflow_payload(
+        _FakeApp(),
+        query="connect the adapter",
+        object_query="adapter",
+        object_type="procedure",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+
+    _print_evidence_brief(payload)
+    output = capsys.readouterr().out
+
+    assert "Evidence brief query: connect the adapter" in output
+    assert "Strong support from 2 retrieved results across 2 sources." in output
+    assert "Sources: manual.pdf, guide.docx" in output
+    assert "Source coverage: Broad source coverage" in output
+    assert "Proof assets: snippet, citation, page_image, highlight" in output
+    assert "Next question 1:" in output
 
 
 def test_workflow_history_store_persists_runs(tmp_path: Path) -> None:

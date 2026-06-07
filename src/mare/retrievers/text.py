@@ -37,6 +37,21 @@ STOPWORDS = {
     "with",
 }
 
+SYNONYM_GROUPS = (
+    {"attach", "connect", "hook", "insert", "plug"},
+    {"compare", "comparison", "differences", "vs", "versus"},
+    {"configure", "configuration", "set", "setup"},
+    {"instruction", "instructions", "procedure", "procedures", "step", "steps"},
+    {"chart", "matrix", "table", "tables"},
+    {"caution", "risk", "risks", "warning", "warnings"},
+)
+
+SYNONYM_LOOKUP = {
+    token: {alias for alias in group if alias != token}
+    for group in SYNONYM_GROUPS
+    for token in group
+}
+
 
 def _tokenize(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", value.lower())
@@ -46,12 +61,38 @@ def _content_tokens(value: str) -> list[str]:
     return [token for token in _tokenize(value) if token not in STOPWORDS]
 
 
+def _query_terms_for_snippet(query: str) -> list[str]:
+    terms: list[str] = []
+    for term in _tokenize(query):
+        if len(term) <= 1:
+            continue
+        if term not in terms:
+            terms.append(term)
+        for alias in sorted(SYNONYM_LOOKUP.get(term, ())):
+            if alias not in terms:
+                terms.append(alias)
+    return terms
+
+
+def _alias_matches(query_tokens: list[str], content_tokens: list[str]) -> dict[str, str]:
+    content_set = set(content_tokens)
+    matches: dict[str, str] = {}
+    for token in query_tokens:
+        if token in content_set:
+            continue
+        aliases = SYNONYM_LOOKUP.get(token, set())
+        alias_overlap = sorted(content_set & aliases)
+        if alias_overlap:
+            matches[token] = alias_overlap[0]
+    return matches
+
+
 def _best_snippet(text: str, query: str, window: int = 220) -> str:
     normalized = re.sub(r"\s+", " ", text).strip()
     if not normalized:
         return ""
 
-    query_terms = [term for term in _tokenize(query) if len(term) > 1]
+    query_terms = _query_terms_for_snippet(query)
     if not query_terms:
         return normalized[:window]
 
@@ -177,16 +218,25 @@ def _best_query_phrase_bonus(query_tokens: list[str], content: str) -> tuple[flo
 def _score_object(query_tokens: list[str], obj: DocumentObject) -> tuple[float, list[str], set[str]]:
     content_tokens = _content_tokens(obj.content)
     overlap = set(query_tokens) & set(content_tokens)
-    if not overlap:
+    alias_matches = _alias_matches(query_tokens, content_tokens)
+    if not overlap and not alias_matches:
         return 0.0, [], set()
 
     avg_len = max(len(content_tokens), 1)
     bm25_score = _bm25_score(query_tokens, content_tokens, avg_len)
     bonus, reasons = _object_bonus(set(query_tokens), obj)
     phrase_bonus, phrase_reasons = _best_query_phrase_bonus(query_tokens, obj.content)
-    density_bonus = min(0.18, len(overlap) / max(len(content_tokens), 1))
+    density_bonus = min(0.18, (len(overlap) + (0.65 * len(alias_matches))) / max(len(content_tokens), 1))
     conciseness_bonus = min(0.12, 12 / max(len(content_tokens), 12))
-    score = min(1.0, (0.35 * min(1.0, bm25_score / 6.0)) + bonus + phrase_bonus + density_bonus + conciseness_bonus)
+    alias_bonus = min(0.15, 0.05 * len(alias_matches))
+    if alias_matches:
+        reasons.append(
+            "alias matches: " + ", ".join(f"{query}->{matched}" for query, matched in sorted(alias_matches.items()))
+        )
+    score = min(
+        1.0,
+        (0.35 * min(1.0, bm25_score / 6.0)) + bonus + phrase_bonus + density_bonus + conciseness_bonus + alias_bonus,
+    )
     return score, reasons + phrase_reasons, overlap
 
 
@@ -220,8 +270,9 @@ class TextRetriever(BaseRetriever):
             doc_tokens = _content_tokens(document.text)
             doc_counts = Counter(doc_tokens)
             overlap = set(query_counts) & set(doc_counts)
+            alias_matches = _alias_matches(query_tokens, doc_tokens)
             best_object, object_score, object_bonus_reasons, object_overlap = _best_object(query_tokens, document.objects)
-            if not overlap and not object_overlap:
+            if not overlap and not alias_matches and not object_overlap:
                 continue
 
             cosine_score = 0.0
@@ -235,9 +286,14 @@ class TextRetriever(BaseRetriever):
                 cosine_score = numerator / norm if norm else 0.0
                 bm25_score = _bm25_score(query_tokens, doc_tokens, avg_doc_len)
                 reason_parts.append(f"Matched text terms: {', '.join(sorted(overlap)[:5])}")
+            if alias_matches:
+                reason_parts.append(
+                    "Alias matches: " + ", ".join(f"{query}->{matched}" for query, matched in sorted(alias_matches.items()))
+                )
 
             structure_bonus, bonus_reasons = _structure_bonus(set(query_tokens), document)
-            score = (0.45 * cosine_score) + (0.2 * min(1.0, bm25_score / 8.0)) + structure_bonus + object_score
+            alias_bonus = min(0.18, 0.06 * len(alias_matches))
+            score = (0.45 * cosine_score) + (0.2 * min(1.0, bm25_score / 8.0)) + structure_bonus + object_score + alias_bonus
             snippet = best_object.content if best_object else _best_snippet(document.text, query)
             hit_metadata = dict(document.metadata)
             if best_object:
