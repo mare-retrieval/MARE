@@ -183,13 +183,14 @@ def _print_intro(app: MAREApp) -> None:
         print(f"Loaded documents: {', '.join(source_documents)}")
     if app.corpus_paths:
         print(f"Loaded corpora: {', '.join(str(path) for path in app.corpus_paths)}")
-    print("Type a question, or use :help, :review, :sources, :actions, :requirements, :risks, :deadlines, :json <question>, :quit")
+    print("Type a question, or use :help, :brief, :review, :sources, :actions, :requirements, :risks, :deadlines, :json <question>, :quit")
     print("")
 
 
 def _print_help() -> None:
     print("Commands")
     print(":actions .. Extract action items with citations for the rest of the line")
+    print(":brief ... Show support strength, evidence gaps, proof assets, and next questions")
     print(":clear-history Clear saved session history for this chat session")
     print(":compare .. Compare grounded evidence across top matches for the rest of the line")
     print(":deadlines Extract deadlines and due-date language for the rest of the line")
@@ -358,6 +359,7 @@ def _print_review(payload: dict) -> None:
     query_step = payload["steps"]["query_corpus"]
     review = query_step.get("review", {})
     best = review.get("best_evidence", {})
+    evidence_brief = review.get("evidence_brief") or query_step.get("evidence_brief") or {}
     print(f"Review query: {query_step['query']}")
     print(review.get("overview") or "No grounded review available.")
     support = review.get("support") or {}
@@ -369,6 +371,10 @@ def _print_review(payload: dict) -> None:
         print(f"Primary citation: {best['citation']}")
     if best.get("snippet"):
         print(f"Primary snippet: {best['snippet']}")
+    if evidence_brief.get("overview"):
+        print(f"Evidence brief: {evidence_brief['overview']}")
+    for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
+        print(f"Next question {index}: {item}")
     finding_counts = review.get("finding_counts", {})
     print(
         "Findings: "
@@ -376,6 +382,30 @@ def _print_review(payload: dict) -> None:
     )
     for index, item in enumerate(review.get("highlights") or [], start=1):
         print(f"{index}. {item}")
+    print("")
+
+
+def _print_evidence_brief(payload: dict) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    evidence_brief = query_step.get("evidence_brief", {})
+    support = evidence_brief.get("support") or {}
+    print(f"Evidence brief query: {query_step['query']}")
+    print(evidence_brief.get("overview") or "No evidence brief available.")
+    if support.get("message"):
+        print(f"Support note: {support['message']}")
+    sources = evidence_brief.get("source_documents") or []
+    print(f"Sources: {', '.join(sources) if sources else '[none]'}")
+    source_diversity = evidence_brief.get("source_diversity") or {}
+    if source_diversity.get("label"):
+        print(f"Source coverage: {source_diversity['label']}")
+    proof_assets = evidence_brief.get("available_proof_assets") or []
+    print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
+    for index, item in enumerate(evidence_brief.get("conflict_hints") or [], start=1):
+        print(f"Conflict hint {index}: {item.get('message') or '[no message]'}")
+    for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
+        print(f"Evidence gap {index}: {item}")
+    for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
+        print(f"Next question {index}: {item}")
     print("")
 
 
@@ -402,6 +432,7 @@ def _print_answer(payload: dict) -> None:
 
     best = results[0]
     support = query_step.get("support", {})
+    evidence_brief = query_step.get("evidence_brief", {})
     source_document = best.get("metadata", {}).get("source", "")
     print(f"Best page: {best['page']}")
     if source_document:
@@ -419,6 +450,14 @@ def _print_answer(payload: dict) -> None:
         print(f"Support: {support['label']}")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    if evidence_brief.get("overview"):
+        print(f"Evidence brief: {evidence_brief['overview']}")
+    gaps = evidence_brief.get("evidence_gaps") or []
+    if gaps:
+        print(f"Evidence gaps: {gaps[0]}")
+    next_questions = evidence_brief.get("next_questions") or []
+    if next_questions:
+        print(f"Next question: {next_questions[0]}")
     print(f"Snippet: {best['snippet'] or '[no snippet available]'}")
     print(f"Reason: {best['reason']}")
     print(f"Page image: {best['page_image_path'] or '[no page image available]'}")
@@ -530,6 +569,25 @@ def run_chat(
             _print_summary(payload)
             if session_store is not None:
                 session_store.append(entry_type="summary", query=query, payload=payload)
+            continue
+        if raw.startswith(":brief"):
+            query = raw[len(":brief") :].strip()
+            if not query:
+                print("Usage: :brief <question>")
+                print("")
+                continue
+            payload = _build_workflow_payload(
+                app,
+                query=query,
+                object_query=query,
+                object_type=None,
+                top_k=top_k,
+                page_limit=page_limit,
+                object_limit=object_limit,
+            )
+            _print_evidence_brief(payload)
+            if session_store is not None:
+                session_store.append(entry_type="brief", query=query, payload=payload)
             continue
         if raw.startswith(":review"):
             query = raw[len(":review") :].strip()

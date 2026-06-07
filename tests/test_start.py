@@ -12,6 +12,7 @@ def test_start_without_path_uses_demo_plan(capsys) -> None:
     output = capsys.readouterr().out
 
     assert "bundled mixed-document example" in output
+    assert 'mare workflow --folder examples/mixed_docs --query "show me the onboarding steps" --task brief' in output
     assert "mare chat --folder examples/mixed_docs" in output
 
 
@@ -26,6 +27,7 @@ def test_start_for_folder_recommends_chat(capsys, tmp_path: Path) -> None:
 
     assert f"Folder: {folder.as_posix()}" in output
     assert "Supported documents found: 2" in output
+    assert f'mare workflow --folder {folder.as_posix()} --query "show me the onboarding steps" --task brief' in output
     assert f"mare chat --folder {folder.as_posix()}" in output
 
 
@@ -38,6 +40,7 @@ def test_start_for_pdf_recommends_ask(capsys, tmp_path: Path) -> None:
 
     assert f"Document: {document.as_posix()}" in output
     assert f'mare ask {document.as_posix()} "what are the key setup steps"' in output
+    assert f'mare workflow --document {document.as_posix()} --query "what are the key setup steps" --task brief' in output
 
 
 def test_start_for_non_pdf_document_recommends_workflow(capsys, tmp_path: Path) -> None:
@@ -48,7 +51,7 @@ def test_start_for_non_pdf_document_recommends_workflow(capsys, tmp_path: Path) 
     output = capsys.readouterr().out
 
     assert f'Document: {document.as_posix()}' in output
-    assert f'mare workflow --document {document.as_posix()} --query "what are the key setup steps"' in output
+    assert f'mare workflow --document {document.as_posix()} --query "what are the key setup steps" --task brief' in output
 
 
 def test_start_for_missing_path_exits() -> None:

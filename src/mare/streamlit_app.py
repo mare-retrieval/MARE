@@ -525,6 +525,46 @@ def _render_grounded_findings(st, findings: dict) -> None:
                 )
 
 
+def _render_evidence_brief(st, evidence_brief: dict) -> None:
+    st.subheader("Evidence Brief")
+    if not evidence_brief:
+        st.caption("No evidence brief is available for this run.")
+        return
+
+    support = evidence_brief.get("support") or {}
+    source_diversity = evidence_brief.get("source_diversity") or {}
+    sources = evidence_brief.get("source_documents") or []
+    proof_assets = evidence_brief.get("available_proof_assets") or []
+    st.markdown(
+        f"""
+        <div class="mare-card" style="margin-bottom:0.9rem;">
+          <div class="mare-label">Trust Snapshot</div>
+          <div class="mare-value">{evidence_brief.get('overview') or 'No evidence brief available.'}</div>
+          <p class="mare-mini" style="margin-top:0.55rem;"><strong>Support:</strong> {support.get('label') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Source coverage:</strong> {source_diversity.get('label') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Sources:</strong> {', '.join(sources) if sources else '[none]'}</p>
+          <p class="mare-mini"><strong>Proof assets:</strong> {', '.join(proof_assets) if proof_assets else '[none]'}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(2)
+    with cols[0]:
+        st.markdown("**Evidence gaps**")
+        for item in evidence_brief.get("evidence_gaps") or []:
+            st.caption(item)
+    with cols[1]:
+        st.markdown("**Next questions**")
+        for item in evidence_brief.get("next_questions") or []:
+            st.caption(item)
+    conflict_hints = evidence_brief.get("conflict_hints") or []
+    if conflict_hints:
+        st.markdown("**Conflict hints**")
+        for item in conflict_hints:
+            st.caption(item.get("message") or "Potentially conflicting evidence signals were detected.")
+
+
 def _render_review_snapshot(st, review: dict) -> None:
     st.subheader("Document Review")
     if not review:
@@ -762,6 +802,7 @@ def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict)
         "explanation": explanation,
         "grounded_summary": evidence_payload.get("summary", {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []}),
         "grounded_findings": evidence_payload.get("findings", {}),
+        "evidence_brief": evidence_payload.get("evidence_brief", {}),
         "grounded_review": evidence_payload.get("review", {}),
         "filenames": [item.name for item in uploaded_sources],
         "app": app,
@@ -1025,6 +1066,9 @@ def main() -> None:
         _render_object_preview(st, explanation)
     with preview_right:
         _render_stack_summary(st, result["stack"])
+
+    st.markdown("")
+    _render_evidence_brief(st, result.get("evidence_brief") or {})
 
     st.markdown("")
     _render_review_snapshot(st, result.get("grounded_review") or {})

@@ -24,6 +24,30 @@ _FINDING_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
+_CONFLICT_SIGNAL_GROUPS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = (
+    (
+        "requirement_vs_optional",
+        (
+            re.compile(r"\b(must|shall|required|required to|mandatory|need to|needs to)\b", re.IGNORECASE),
+            re.compile(r"\b(optional|may|can|recommended|if needed|when needed)\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "allow_vs_avoid",
+        (
+            re.compile(r"\b(do not|don't|avoid|never|prohibited|not allowed)\b", re.IGNORECASE),
+            re.compile(r"\b(use|enable|install|connect|submit|required to|must)\b", re.IGNORECASE),
+        ),
+    ),
+    (
+        "timing_order",
+        (
+            re.compile(r"\b(before|prior to|first)\b", re.IGNORECASE),
+            re.compile(r"\b(after|following|then|later)\b", re.IGNORECASE),
+        ),
+    ),
+)
+
 
 def format_evidence_citation(
     *,
@@ -155,6 +179,257 @@ def build_grounded_summary_payload(results: list[dict[str, Any]], *, limit: int 
     }
 
 
+def build_evidence_brief_payload(
+    query: str,
+    results: list[dict[str, Any]],
+    *,
+    support: dict[str, Any] | None = None,
+    limit: int = 3,
+) -> dict[str, Any]:
+    """Build a deterministic trust brief for humans and agent clients."""
+    resolved_support = support or _infer_support_from_results(results)
+    best = results[0] if results else {}
+    unique_sources = _unique_source_labels(results)
+    source_diversity = _source_diversity_payload(results, unique_sources)
+    conflict_hints = _conflict_hints(results)
+    available_proof_assets = [
+        name
+        for name, value in (
+            ("snippet", best.get("snippet")),
+            ("citation", best.get("citation")),
+            ("page_image", best.get("page_image_path")),
+            ("highlight", best.get("highlight_image_path")),
+        )
+        if value
+    ]
+    gaps = _evidence_gaps(results, resolved_support, unique_sources, conflict_hints=conflict_hints)
+    next_questions = _next_evidence_questions(query=query, results=results, gaps=gaps, limit=limit)
+
+    return {
+        "overview": _evidence_brief_overview(results, resolved_support, unique_sources),
+        "support": resolved_support,
+        "source_count": len(unique_sources),
+        "source_documents": unique_sources,
+        "source_diversity": source_diversity,
+        "conflict_hints": conflict_hints,
+        "available_proof_assets": available_proof_assets,
+        "evidence_gaps": gaps,
+        "next_questions": next_questions,
+    }
+
+
+def _infer_support_from_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    if not results:
+        return {
+            "status": "none",
+            "label": "No support",
+            "message": "No grounded evidence was found for this query.",
+            "best_score": None,
+            "plan_confidence": None,
+        }
+
+    best_score = results[0].get("score")
+    score = float(best_score) if isinstance(best_score, (int, float)) else 0.0
+    if score >= 0.85:
+        status = "strong"
+        label = "Strong support"
+        message = "Grounded evidence looks strong for this answer."
+    elif score >= 0.65:
+        status = "moderate"
+        label = "Moderate support"
+        message = "Grounded evidence is useful, but you may want to inspect the proof directly."
+    else:
+        status = "weak"
+        label = "Weak support"
+        message = "Evidence is weak or ambiguous. Inspect the proof carefully or refine the question."
+
+    return {
+        "status": status,
+        "label": label,
+        "message": message,
+        "best_score": score,
+        "plan_confidence": None,
+    }
+
+
+def _unique_source_labels(results: list[dict[str, Any]]) -> list[str]:
+    sources: list[str] = []
+    seen: set[str] = set()
+    for hit in results:
+        metadata = hit.get("metadata", {})
+        source = str(metadata.get("source") or hit.get("title") or "").strip()
+        if not source:
+            continue
+        label = Path(source).name
+        if label in seen:
+            continue
+        seen.add(label)
+        sources.append(label)
+    return sources
+
+
+def _source_label(hit: dict[str, Any]) -> str:
+    metadata = hit.get("metadata", {})
+    source = str(metadata.get("source") or hit.get("title") or "").strip()
+    return Path(source).name if source else ""
+
+
+def _source_diversity_payload(results: list[dict[str, Any]], sources: list[str]) -> dict[str, Any]:
+    if not results:
+        return {
+            "status": "none",
+            "label": "No source coverage",
+            "message": "No sources were retrieved.",
+            "source_count": 0,
+            "result_count": 0,
+            "ratio": 0.0,
+        }
+
+    source_count = len(sources)
+    result_count = len(results)
+    ratio = source_count / max(result_count, 1)
+    if source_count >= 3 or (source_count >= 2 and ratio >= 0.5):
+        status = "broad"
+        label = "Broad source coverage"
+        message = "Evidence is spread across multiple sources."
+    elif source_count == 2:
+        status = "mixed"
+        label = "Mixed source coverage"
+        message = "Evidence includes more than one source, but coverage is still narrow."
+    elif source_count == 1:
+        status = "single_source"
+        label = "Single-source coverage"
+        message = "Evidence is concentrated in one source."
+    else:
+        status = "unknown"
+        label = "Unknown source coverage"
+        message = "Source coverage could not be determined from the retrieved evidence."
+
+    return {
+        "status": status,
+        "label": label,
+        "message": message,
+        "source_count": source_count,
+        "result_count": result_count,
+        "ratio": round(ratio, 4),
+    }
+
+
+def _conflict_hints(results: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    for group_name, patterns in _CONFLICT_SIGNAL_GROUPS:
+        matches_by_pattern: list[list[dict[str, str]]] = []
+        for pattern in patterns:
+            matches: list[dict[str, str]] = []
+            for hit in results:
+                text = _normalize_finding_text(hit.get("snippet") or hit.get("reason") or "")
+                match = pattern.search(text)
+                if not match:
+                    continue
+                matches.append(
+                    {
+                        "signal": match.group(0),
+                        "citation": hit.get("citation") or "",
+                        "source_document": _source_label(hit),
+                        "snippet": text,
+                    }
+                )
+            matches_by_pattern.append(matches)
+
+        if all(matches_by_pattern):
+            hints.append(
+                {
+                    "type": group_name,
+                    "message": _conflict_hint_message(group_name),
+                    "signals": [matches[0] for matches in matches_by_pattern],
+                }
+            )
+        if len(hints) >= limit:
+            break
+    return hints
+
+
+def _conflict_hint_message(group_name: str) -> str:
+    messages = {
+        "requirement_vs_optional": "Retrieved evidence mixes requirement and optional language; compare the cited sources before acting.",
+        "allow_vs_avoid": "Retrieved evidence may mix action and avoidance language; inspect the cited snippets for scope.",
+        "timing_order": "Retrieved evidence may include different timing or ordering language; verify the sequence.",
+    }
+    return messages.get(group_name, "Retrieved evidence may contain conflicting signals; inspect the cited snippets.")
+
+
+def _evidence_gaps(
+    results: list[dict[str, Any]],
+    support: dict[str, Any],
+    sources: list[str],
+    *,
+    conflict_hints: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    if not results:
+        return ["No grounded evidence was retrieved."]
+
+    gaps: list[str] = []
+    if support.get("status") in {"weak", "none"}:
+        gaps.append("Support is weak; ask a narrower question or increase top-k.")
+    if len(sources) <= 1 and len(results) > 1:
+        gaps.append("Evidence comes from one source; compare related documents if available.")
+    if conflict_hints:
+        gaps.append("Potentially conflicting evidence signals were detected; inspect the cited snippets before acting.")
+
+    best = results[0]
+    if not best.get("highlight_image_path"):
+        gaps.append("No highlighted visual proof is available for the top result.")
+    if not best.get("snippet"):
+        gaps.append("No exact snippet is available for the top result.")
+
+    if not gaps:
+        gaps.append("No obvious evidence gaps detected in the retrieved results.")
+    return gaps
+
+
+def _next_evidence_questions(
+    *,
+    query: str,
+    results: list[dict[str, Any]],
+    gaps: list[str],
+    limit: int,
+) -> list[str]:
+    if not results:
+        base_query = query.strip() or "this topic"
+        return [
+            f"Which document discusses {base_query}?",
+            f"What exact section or page supports {base_query}?",
+        ][:limit]
+
+    suggestions: list[str] = []
+    best = results[0]
+    source = Path(str(best.get("metadata", {}).get("source") or best.get("title") or "the top source")).name
+    object_type = best.get("object_type") or "page"
+    if any("one source" in gap for gap in gaps):
+        suggestions.append(f"Compare this answer against other documents besides {source}.")
+    if any("weak" in gap.lower() for gap in gaps):
+        suggestions.append(f"Find stronger evidence for: {query.strip()}")
+    suggestions.append(f"Show the exact {object_type} evidence from {source}.")
+    suggestions.append(f"What actions, requirements, risks, or deadlines are supported by this evidence?")
+
+    deduped: list[str] = []
+    for item in suggestions:
+        if item not in deduped:
+            deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _evidence_brief_overview(results: list[dict[str, Any]], support: dict[str, Any], sources: list[str]) -> str:
+    if not results:
+        return "No evidence brief available because no grounded results were retrieved."
+    label = support.get("label") or "Support unknown"
+    source_count = len(sources)
+    source_label = "source" if source_count == 1 else "sources"
+    return f"{label} from {len(results)} retrieved result{'s' if len(results) != 1 else ''} across {source_count} {source_label}."
+
+
 def _normalize_finding_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
@@ -236,11 +511,17 @@ def build_grounded_review_payload(
     summary: dict[str, Any] | None = None,
     findings: dict[str, Any] | None = None,
     support: dict[str, Any] | None = None,
+    evidence_brief: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_comparison = comparison if comparison is not None else _build_comparison_payload(results)
     resolved_summary = summary if summary is not None else build_grounded_summary_payload(results)
     resolved_findings = findings if findings is not None else build_all_grounded_findings_payload(results)
     resolved_support = support or {}
+    resolved_evidence_brief = evidence_brief if evidence_brief is not None else build_evidence_brief_payload(
+        "",
+        results,
+        support=resolved_support,
+    )
 
     best = results[0] if results else {}
     finding_counts = {
@@ -269,6 +550,7 @@ def build_grounded_review_payload(
             "score": best.get("score"),
         },
         "support": resolved_support,
+        "evidence_brief": resolved_evidence_brief,
         "summary_overview": resolved_summary.get("overview") or "",
         "comparison_count": len(resolved_comparison),
         "finding_counts": finding_counts,
@@ -281,13 +563,21 @@ def hits_to_evidence_payload(query: str, hits: list[RetrievalHit]) -> dict[str, 
     comparison = _build_comparison_payload(results)
     summary = build_grounded_summary_payload(results)
     findings = build_all_grounded_findings_payload(results)
+    evidence_brief = build_evidence_brief_payload(query, results)
     return {
         "query": query,
         "results": results,
         "comparison": comparison,
         "summary": summary,
         "findings": findings,
-        "review": build_grounded_review_payload(results, comparison=comparison, summary=summary, findings=findings),
+        "evidence_brief": evidence_brief,
+        "review": build_grounded_review_payload(
+            results,
+            comparison=comparison,
+            summary=summary,
+            findings=findings,
+            evidence_brief=evidence_brief,
+        ),
     }
 
 

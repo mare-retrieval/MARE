@@ -8,6 +8,7 @@ SUPPORTED_DOCUMENT_SUFFIXES = {".pdf", ".md", ".markdown", ".txt", ".docx"}
 DEFAULT_DEMO_FOLDER = Path("examples/mixed_docs")
 DEFAULT_CHAT_QUERY = "show me the onboarding steps"
 DEFAULT_DOCUMENT_QUERY = "what are the key setup steps"
+DEFAULT_BRIEF_QUERY = "show me the onboarding steps"
 
 
 def _supported_files(folder: Path) -> list[Path]:
@@ -26,6 +27,7 @@ def _print_intro() -> None:
     print("MARE start")
     print("")
     print("Best first run: point MARE at a document or folder and ask a concrete question with proof.")
+    print("For the trust-first demo, use an Evidence Brief: support strength, proof assets, gaps, and next questions.")
     print("")
 
 
@@ -34,11 +36,13 @@ def _print_folder_plan(folder: Path, files: list[Path]) -> None:
     print(f"Supported documents found: {len(files)}")
     print("")
     print("Recommended next steps")
-    print("  1. Start with chat for the fastest trust-building workflow")
+    print("  1. Start with an Evidence Brief for the fastest trust-building workflow")
+    print(f'     mare workflow --folder {_format_path(folder)} --query "{DEFAULT_BRIEF_QUERY}" --task brief')
+    print("  2. Then use chat for an interactive document-agent loop")
     print(f"     mare chat --folder {_format_path(folder)}")
-    print(f"  2. Try a concrete question")
+    print(f"  3. Try a concrete question")
     print(f'     {DEFAULT_CHAT_QUERY}')
-    print("  3. If you want the visual proof view and have UI deps installed")
+    print("  4. If you want the visual proof view and have UI deps installed")
     print("     mare ui")
     print("")
 
@@ -50,11 +54,13 @@ def _print_document_plan(document: Path) -> None:
     if document.suffix.lower() == ".pdf":
         print("  1. Ask a single PDF the fastest way")
         print(f'     mare ask {_format_path(document)} "{DEFAULT_DOCUMENT_QUERY}"')
-        print("  2. If you want the visual proof view and have UI deps installed")
+        print("  2. Inspect the trust layer with an Evidence Brief")
+        print(f'     mare workflow --document {_format_path(document)} --query "{DEFAULT_DOCUMENT_QUERY}" --task brief')
+        print("  3. If you want the visual proof view and have UI deps installed")
         print("     mare ui")
     else:
-        print("  1. Use workflow for a single non-PDF document")
-        print(f'     mare workflow --document {_format_path(document)} --query "{DEFAULT_DOCUMENT_QUERY}"')
+        print("  1. Use workflow for a single non-PDF document with an Evidence Brief")
+        print(f'     mare workflow --document {_format_path(document)} --query "{DEFAULT_DOCUMENT_QUERY}" --task brief')
         print("  2. If you want an agent-style loop, put this file in a folder and run")
         print(f"     mare chat --folder {_format_path(document.parent)}")
     print("")
@@ -64,11 +70,13 @@ def _print_demo_plan() -> None:
     print("No path provided, so start with the bundled mixed-document example.")
     print("")
     print("Recommended next steps")
-    print(f"  1. Explore the example folder")
+    print(f"  1. Run the trust-first Evidence Brief demo")
+    print(f'     mare workflow --folder {_format_path(DEFAULT_DEMO_FOLDER)} --query "{DEFAULT_BRIEF_QUERY}" --task brief')
+    print(f"  2. Explore the example folder interactively")
     print(f"     mare chat --folder {_format_path(DEFAULT_DEMO_FOLDER)}")
-    print(f"  2. Try a concrete question")
+    print(f"  3. Try a concrete question")
     print(f'     {DEFAULT_CHAT_QUERY}')
-    print("  3. If you want the visual proof view and have UI deps installed")
+    print("  4. If you want the visual proof view and have UI deps installed")
     print("     mare ui")
     print("")
 

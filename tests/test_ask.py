@@ -39,6 +39,7 @@ def test_print_answer_block_shows_best_hit(capsys) -> None:
 
     assert "Best Match" in output
     assert "Page: 2" in output
+    assert "Support: Strong support" in output
     assert "generated/doc/page-2.png" in output
     assert "Highlighted image:" in output
 
