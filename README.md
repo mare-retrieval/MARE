@@ -14,6 +14,8 @@ documents -> exact evidence -> source coverage -> support strength -> gaps -> ne
 
 MARE is not another generic chat-with-PDF app. It is the document evidence layer underneath products, RAG systems, MCP tools, OpenClaw/Hermes-style agents, and local document workflows.
 
+Optional modern retrieval stacks include FastEmbed semantic retrieval and reranking for lighter ONNX-based embeddings, experimental ColPali/ColQwen visual page retrieval for layout-heavy PDFs, plus sentence-transformers, FAISS, and Qdrant for deeper vector workflows.
+
 ## Trust-First Demo
 
 From a repo checkout:
@@ -81,6 +83,13 @@ Run an Evidence Brief over your own folder:
 mare workflow --folder ./docs --query "what does this document set require?" --task brief
 ```
 
+Choose a retrieval stack explicitly when you want to test an optional path:
+
+```bash
+mare workflow --folder ./docs --query "show me the diagram" --task brief --retriever colpali-visual
+mare chat --folder ./docs --retriever fastembed
+```
+
 Ask one document a question:
 
 ```bash
@@ -99,6 +108,16 @@ Then open:
 http://localhost:8501
 ```
 
+Compare retrieval stacks before choosing one:
+
+```bash
+mare-eval --corpus generated/manual.json --eval examples/eval_cases.json --stack builtin --stack fastembed --stack hybrid-semantic
+```
+
+The comparison output includes a recommendation block with the best stack and ranked page/doc/object/no-result metrics.
+If you install `mare-retrieval[colpali]`, you can also compare `--stack colpali-visual` on corpora with rendered PDF page images.
+If the corpus has no rendered page images, MARE will explain that the visual retriever needs PDF page images and suggest a text retriever instead.
+
 ## What You Get
 
 MARE can return:
@@ -109,7 +128,9 @@ MARE can return:
 - rendered PDF page image when available
 - highlighted PDF proof image when localization is possible
 - retrieval rationale and score
+- optional visual page retrieval for image-, chart-, table-, and layout-heavy PDFs through `mare-retrieval[colpali]`
 - Evidence Brief with source coverage, support strength, conflict hints, proof assets, gaps, and next questions
+- evidence rescue in `mare workflow` and `mare chat`: when initial support is weak or missing, MARE tries alternate evidence-seeking queries and records whether stronger proof was found
 - structured payloads for agents, tools, and applications
 
 ## Supported Documents
@@ -181,6 +202,8 @@ The base install stays lightweight. Add extras as needed:
 
 ```bash
 pip install "mare-retrieval[ui]"
+pip install "mare-retrieval[fastembed]"
+pip install "mare-retrieval[colpali]"
 pip install "mare-retrieval[sentence-transformers]"
 pip install "mare-retrieval[faiss]"
 pip install "mare-retrieval[langchain]"
@@ -189,7 +212,7 @@ pip install "mare-retrieval[mcp]"
 pip install "mare-retrieval[integrations]"
 ```
 
-Advanced optional paths include hybrid semantic retrieval, sentence-transformers, FAISS, Qdrant, FastEmbed reranking, LangChain, LangGraph, LlamaIndex, Docling, Unstructured, PaddleOCR, and Surya.
+Advanced optional paths include FastEmbed semantic retrieval and reranking, experimental ColPali/ColQwen visual page retrieval, hybrid semantic retrieval, sentence-transformers, FAISS, Qdrant, LangChain, LangGraph, LlamaIndex, Docling, Unstructured, PaddleOCR, and Surya.
 
 ## Generated Files
 

@@ -32,6 +32,15 @@ class ResultReranker(Protocol):
 
 RetrieverFactory = Callable[[list], BaseRetriever]
 
+SUPPORTED_RETRIEVER_STACKS = (
+    "smart",
+    "builtin",
+    "fastembed",
+    "hybrid-semantic",
+    "sentence-transformers",
+    "colpali-visual",
+)
+
 
 def _to_vector_list(vector) -> list[float]:
     if hasattr(vector, "tolist"):
@@ -81,6 +90,22 @@ def _document_payload(document) -> dict:
     }
 
 
+def _as_score_list(scores) -> list[float]:
+    if isinstance(scores, (int, float)):
+        return [float(scores)]
+    if hasattr(scores, "detach"):
+        scores = scores.detach()
+    if hasattr(scores, "cpu"):
+        scores = scores.cpu()
+    if hasattr(scores, "tolist"):
+        scores = scores.tolist()
+    if isinstance(scores, list) and scores and isinstance(scores[0], list):
+        scores = scores[0]
+    if not isinstance(scores, list):
+        scores = list(scores)
+    return [float(score) for score in scores]
+
+
 @dataclass
 class MAREConfig:
     parser: str | DocumentParser | None = None
@@ -95,6 +120,8 @@ def _module_available(module_name: str) -> bool:
 
 
 def recommended_retriever_key() -> str:
+    if _module_available("fastembed"):
+        return "fastembed"
     return "hybrid-semantic" if _module_available("sentence_transformers") else "builtin"
 
 
@@ -102,11 +129,19 @@ def resolve_runtime_config(config: MAREConfig | None = None) -> MAREConfig:
     if config is not None:
         return config
 
-    if recommended_retriever_key() != "hybrid-semantic":
+    recommended_key = recommended_retriever_key()
+    if recommended_key == "fastembed":
+        return MAREConfig(
+            retriever_factories={Modality.TEXT: lambda documents: FastEmbedRetriever(documents)},
+            retriever_label="FastEmbed semantic",
+            retriever_resolution_note="Defaulted to FastEmbed semantic retrieval because fastembed is available.",
+        )
+
+    if recommended_key != "hybrid-semantic":
         return MAREConfig(
             retriever_label="Built-in lexical",
             retriever_resolution_note=(
-                "Defaulted to Built-in lexical retrieval because sentence-transformers is not installed."
+                "Defaulted to Built-in lexical retrieval because FastEmbed and sentence-transformers are not installed."
             ),
         )
 
@@ -115,6 +150,42 @@ def resolve_runtime_config(config: MAREConfig | None = None) -> MAREConfig:
         retriever_label="Hybrid semantic + lexical",
         retriever_resolution_note="Defaulted to Hybrid semantic + lexical retrieval because sentence-transformers is available.",
     )
+
+
+def config_for_retriever_stack(stack: str) -> MAREConfig:
+    """Build a runtime config for a named user-facing retrieval stack."""
+    if stack == "smart":
+        return resolve_runtime_config()
+    if stack == "builtin":
+        return MAREConfig(
+            retriever_label="Built-in lexical",
+            retriever_resolution_note="Using MARE's built-in lexical/object-aware retrieval.",
+        )
+    if stack == "fastembed":
+        return MAREConfig(
+            retriever_factories={Modality.TEXT: lambda documents: FastEmbedRetriever(documents)},
+            retriever_label="FastEmbed semantic",
+            retriever_resolution_note="Using optional FastEmbed semantic retrieval.",
+        )
+    if stack == "hybrid-semantic":
+        return MAREConfig(
+            retriever_factories={Modality.TEXT: lambda documents: HybridSemanticRetriever(documents)},
+            retriever_label="Hybrid semantic + lexical",
+            retriever_resolution_note="Using hybrid semantic + lexical retrieval.",
+        )
+    if stack == "sentence-transformers":
+        return MAREConfig(
+            retriever_factories={Modality.TEXT: lambda documents: SentenceTransformersRetriever(documents)},
+            retriever_label="Sentence Transformers",
+            retriever_resolution_note="Using optional sentence-transformers semantic retrieval.",
+        )
+    if stack == "colpali-visual":
+        return MAREConfig(
+            retriever_factories={Modality.TEXT: lambda documents: ColPaliVisualRetriever(documents)},
+            retriever_label="ColPali visual (Experimental)",
+            retriever_resolution_note="Using experimental ColPali/ColQwen visual page retrieval for rendered page images.",
+        )
+    raise ValueError(f"Unsupported retriever stack '{stack}'. Expected one of: {', '.join(SUPPORTED_RETRIEVER_STACKS)}")
 
 
 class BuiltinPDFParser:
@@ -696,6 +767,245 @@ class SentenceTransformersRetriever(BaseRetriever):
                 )
 
         return top_hits
+
+
+class FastEmbedRetriever(BaseRetriever):
+    """Semantic retriever backed by Qdrant/FastEmbed ONNX embeddings."""
+
+    modality = Modality.TEXT
+
+    def __init__(self, documents: list, model_name: str = "BAAI/bge-small-en-v1.5", model=None) -> None:
+        super().__init__(documents)
+        self.model_name = model_name
+        self.model = model
+        self._doc_embeddings = None
+
+    def _get_model(self):
+        if self.model is not None:
+            return self.model
+        try:
+            from fastembed import TextEmbedding
+        except ImportError as exc:
+            raise RuntimeError(
+                "FastEmbedRetriever requires FastEmbed. Install it with "
+                "`pip install 'mare-retrieval[fastembed]'` or `pip install fastembed`."
+            ) from exc
+        self.model = TextEmbedding(model_name=self.model_name)
+        return self.model
+
+    def _embed(self, texts: list[str]):
+        return list(self._get_model().embed(texts))
+
+    def _get_doc_embeddings(self):
+        if self._doc_embeddings is not None:
+            return self._doc_embeddings
+        texts = [document.text or document.title for document in self.documents]
+        self._doc_embeddings = self._embed(texts)
+        return self._doc_embeddings
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        from mare.highlight import render_highlighted_page, render_object_region_highlight
+        from mare.retrievers.text import _best_object, _best_snippet, _content_tokens
+
+        query_embedding = self._embed([query])[0]
+        query_tokens = _content_tokens(query)
+        hits: list[RetrievalHit] = []
+
+        for document, embedding in zip(self.documents, self._get_doc_embeddings()):
+            score = round(_cosine_similarity(query_embedding, embedding), 4)
+            if score <= 0:
+                continue
+            best_object, _, _, _ = _best_object(query_tokens, document.objects)
+            snippet = best_object.content if best_object else _best_snippet(document.text or document.title, query)
+            hit_metadata = dict(document.metadata)
+            if best_object:
+                hit_metadata.update(best_object.metadata)
+            hits.append(
+                RetrievalHit(
+                    doc_id=document.doc_id,
+                    title=document.title,
+                    page=document.page,
+                    modality=self.modality,
+                    score=score,
+                    reason=f"FastEmbed semantic match via {self.model_name}",
+                    snippet=snippet,
+                    page_image_path=document.page_image_path,
+                    object_id=best_object.object_id if best_object else "",
+                    object_type=best_object.object_type.value if best_object else "",
+                    metadata=hit_metadata,
+                )
+            )
+
+        top_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
+        for hit in top_hits:
+            source_pdf = hit.metadata.get("source", "")
+            if source_pdf and hit.page_image_path and hit.snippet:
+                hit.highlight_image_path = render_highlighted_page(
+                    pdf_path=source_pdf,
+                    page_number=hit.page,
+                    page_image_path=hit.page_image_path,
+                    query=query,
+                    snippet=hit.snippet,
+                )
+            if not hit.highlight_image_path and hit.page_image_path and hit.object_type in {"table", "figure", "section"}:
+                hit.highlight_image_path = render_object_region_highlight(
+                    page_image_path=hit.page_image_path,
+                    page_number=hit.page,
+                    object_type=hit.object_type,
+                    metadata=hit.metadata,
+                )
+
+        return top_hits
+
+
+class ColPaliVisualRetriever(BaseRetriever):
+    """Experimental page-image retriever backed by ColPali/ColQwen-style visual embeddings.
+
+    This retriever works at page level and requires rendered page images in the
+    MARE corpus. It is intentionally opt-in because the underlying models are
+    heavier than the default local evidence pipeline.
+    """
+
+    modality = Modality.IMAGE
+
+    def __init__(
+        self,
+        documents: list,
+        *,
+        model_name: str = "vidore/colqwen2-v1.0",
+        model=None,
+        processor=None,
+        image_loader: Callable[[str], object] | None = None,
+        device: str = "auto",
+    ) -> None:
+        super().__init__(documents)
+        self.model_name = model_name
+        self.model = model
+        self.processor = processor
+        self.image_loader = image_loader
+        self.device = device
+        self._image_entries = None
+        self._image_embeddings = None
+
+    def _get_model_and_processor(self):
+        if self.model is not None and self.processor is not None:
+            return self.model, self.processor
+
+        try:
+            import torch
+            from colpali_engine.models import ColPali, ColPaliProcessor, ColQwen2, ColQwen2Processor
+        except ImportError as exc:
+            raise RuntimeError(
+                "ColPaliVisualRetriever requires ColPali Engine, Pillow, and PyTorch. Install it with "
+                "`pip install 'mare-retrieval[colpali]'`."
+            ) from exc
+
+        model_cls, processor_cls = (
+            (ColPali, ColPaliProcessor) if "colpali" in self.model_name.lower() else (ColQwen2, ColQwen2Processor)
+        )
+        model_kwargs = {"torch_dtype": torch.bfloat16, "device_map": self.device}
+        try:
+            self.model = model_cls.from_pretrained(self.model_name, **model_kwargs).eval()
+        except TypeError:
+            self.model = model_cls.from_pretrained(self.model_name).eval()
+        self.processor = processor_cls.from_pretrained(self.model_name)
+        return self.model, self.processor
+
+    def _get_image_entries(self):
+        if self._image_entries is not None:
+            return self._image_entries
+        entries = []
+        for document in self.documents:
+            page_image_path = str(document.page_image_path or "").strip()
+            if not page_image_path:
+                continue
+            if self.image_loader is None and not Path(page_image_path).is_file():
+                continue
+            entries.append((document, page_image_path))
+        self._image_entries = entries
+        return self._image_entries
+
+    def _load_image(self, image_path: str):
+        if self.image_loader is not None:
+            return self.image_loader(image_path)
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError(
+                "ColPaliVisualRetriever requires Pillow. Install it with `pip install 'mare-retrieval[colpali]'`."
+            ) from exc
+        with Image.open(image_path) as image:
+            return image.convert("RGB")
+
+    def _move_to_model_device(self, batch, model):
+        target_device = getattr(model, "device", None)
+        if target_device is not None and hasattr(batch, "to"):
+            return batch.to(target_device)
+        return batch
+
+    def _forward(self, model, batch):
+        try:
+            import torch
+        except ImportError:
+            torch = None
+        if torch is None:
+            if isinstance(batch, dict):
+                return model(**batch)
+            return model(batch)
+        with torch.no_grad():
+            if isinstance(batch, dict):
+                return model(**batch)
+            return model(batch)
+
+    def _get_image_embeddings(self):
+        if self._image_embeddings is not None:
+            return self._image_embeddings
+        model, processor = self._get_model_and_processor()
+        entries = self._get_image_entries()
+        images = [self._load_image(image_path) for _, image_path in entries]
+        if not images:
+            self._image_embeddings = []
+            return self._image_embeddings
+        batch = self._move_to_model_device(processor.process_images(images), model)
+        embeddings = self._forward(model, batch)
+        self._image_embeddings = embeddings
+        return self._image_embeddings
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievalHit]:
+        entries = self._get_image_entries()
+        if not entries:
+            raise RuntimeError(
+                "ColPali visual retrieval needs rendered PDF page images in the corpus. "
+                "Ingest a PDF first so MARE creates generated/<document>/page-*.png, "
+                "or choose --retriever builtin, fastembed, or hybrid-semantic for text-only corpora."
+            )
+
+        model, processor = self._get_model_and_processor()
+        image_embeddings = self._get_image_embeddings()
+        query_batch = self._move_to_model_device(processor.process_queries([query]), model)
+        query_embeddings = self._forward(model, query_batch)
+        scores = _as_score_list(processor.score_multi_vector(query_embeddings, image_embeddings))
+
+        hits: list[RetrievalHit] = []
+        for (document, image_path), score in zip(entries, scores):
+            if score <= 0:
+                continue
+            snippet = document.text[:240] if document.text else document.image_caption or document.title
+            hits.append(
+                RetrievalHit(
+                    doc_id=document.doc_id,
+                    title=document.title,
+                    page=document.page,
+                    modality=self.modality,
+                    score=round(float(score), 4),
+                    reason=f"ColPali visual page match via {self.model_name}",
+                    snippet=snippet,
+                    page_image_path=image_path,
+                    metadata={**document.metadata, "visual_retriever": "colpali", "model": self.model_name},
+                )
+            )
+
+        return sorted(hits, key=lambda hit: hit.score, reverse=True)[:top_k]
 
 
 class HybridSemanticRetriever(BaseRetriever):

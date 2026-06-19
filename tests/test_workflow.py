@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
+import pytest
 from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 from mare.extensions import MAREConfig
 from mare.workflow import (
@@ -15,6 +17,7 @@ from mare.workflow import (
     _print_review,
     _print_pretty,
     build_history_store,
+    main,
 )
 
 
@@ -91,6 +94,49 @@ class _FakeApp:
         )
 
 
+class _WeakThenRescuedApp(_FakeApp):
+    def explain(self, query: str, top_k: int = 3):
+        if query.startswith("exact evidence for"):
+            score = 0.91
+            snippet = "The onboarding checklist requires completing payroll forms before system access."
+            reason = "Matched exact evidence for onboarding checklist requirements."
+        else:
+            score = 0.32
+            snippet = "Onboarding information appears in this packet."
+            reason = "Matched broad onboarding wording."
+
+        return RetrievalExplanation(
+            plan=QueryPlan(
+                query=query,
+                selected_modalities=[Modality.TEXT],
+                discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                confidence=0.8,
+                intent="semantic_lookup",
+                rationale="test",
+            ),
+            per_modality_results={},
+            fused_results=[
+                RetrievalHit(
+                    doc_id="doc-1",
+                    title="Onboarding",
+                    page=3,
+                    modality=Modality.TEXT,
+                    score=score,
+                    reason=reason,
+                    snippet=snippet,
+                    object_id="doc-1:section:1",
+                    object_type="section",
+                    metadata={"source": "employee-onboarding.docx"},
+                ),
+            ],
+        )
+
+
+class _BrokenRetrieverApp(_FakeApp):
+    def explain(self, query: str, top_k: int = 3):
+        raise RuntimeError("ColPali visual retrieval needs rendered PDF page images in the corpus.")
+
+
 def test_default_output_path_uses_generated_folder() -> None:
     output = _default_output_path(Path("manual.pdf"))
     assert output == Path("generated/manual.json")
@@ -143,7 +189,7 @@ def test_load_app_combines_pdfs_and_corpora(monkeypatch) -> None:
     fake_multi_app = _FakeApp()
     fake_multi_app.corpus_paths = [Path("generated/manual-a.json"), Path("generated/manual-b.json")]
     monkeypatch.setattr("mare.workflow.load_document", lambda **kwargs: fake_pdf_app)
-    monkeypatch.setattr("mare.workflow.load_corpora", lambda paths: fake_multi_app)
+    monkeypatch.setattr("mare.workflow.load_corpora", lambda paths, config=None: fake_multi_app)
 
     app = _load_app(
         documents=["manual-a.md"],
@@ -153,6 +199,35 @@ def test_load_app_combines_pdfs_and_corpora(monkeypatch) -> None:
     )
 
     assert app is fake_multi_app
+
+
+def test_load_app_passes_retriever_config_to_corpus_loader(monkeypatch) -> None:
+    fake_app = _FakeApp()
+    seen = {}
+
+    def _fake_load_corpus(path, config=None):
+        seen["config"] = config
+        return fake_app
+
+    monkeypatch.setattr("mare.workflow.load_corpus", _fake_load_corpus)
+    config = MAREConfig(retriever_label="FastEmbed semantic")
+
+    app = _load_app(documents=[], corpora=["generated/manual.json"], reuse=True, parser="builtin", config=config)
+
+    assert app is fake_app
+    assert seen["config"] is config
+
+
+def test_workflow_main_exits_cleanly_on_retriever_setup_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mare-workflow", "--document", "manual.md", "--query", "show me the diagram"],
+    )
+    monkeypatch.setattr("mare.workflow._load_app", lambda **kwargs: _BrokenRetrieverApp())
+
+    with pytest.raises(SystemExit, match="needs rendered PDF page images"):
+        main()
 
 
 def test_build_workflow_payload_returns_agent_shape() -> None:
@@ -178,6 +253,27 @@ def test_build_workflow_payload_returns_agent_shape() -> None:
     assert payload["steps"]["query_corpus"]["support"]["status"] == "strong"
     assert payload["steps"]["query_corpus"]["evidence_brief"]["source_count"] == 2
     assert payload["steps"]["query_corpus"]["review"]["evidence_brief"]["support"]["status"] == "strong"
+    assert payload["steps"]["query_corpus"]["evidence_rescue"]["attempted"] is False
+
+
+def test_build_workflow_payload_rescues_weak_evidence() -> None:
+    payload = _build_workflow_payload(
+        _WeakThenRescuedApp(),
+        query="what onboarding items are required",
+        object_query="onboarding required",
+        object_type="section",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+    query_step = payload["steps"]["query_corpus"]
+
+    assert query_step["support"]["status"] == "strong"
+    assert query_step["retrieval_query"] == "exact evidence for what onboarding items are required"
+    assert query_step["results"][0]["snippet"] == "The onboarding checklist requires completing payroll forms before system access."
+    assert query_step["evidence_rescue"]["attempted"] is True
+    assert query_step["evidence_rescue"]["improved"] is True
+    assert query_step["evidence_rescue"]["best_query"] == "exact evidence for what onboarding items are required"
 
 
 def test_print_pretty_shows_human_friendly_summary(capsys) -> None:

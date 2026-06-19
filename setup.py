@@ -7,7 +7,7 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 
 setup(
     name="mare-retrieval",
-    version="0.4.4",
+    version="0.4.5",
     description="Grounded document evidence engine for agents and developers that returns citations, snippets, highlights, source coverage, support strength, conflict hints, evidence gaps, and next questions.",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -20,6 +20,7 @@ setup(
     install_requires=["pypdf>=4.0", "pypdfium2>=4.30.0"],
     extras_require={
         "dev": ["pytest>=8.0"],
+        "publish": ["build>=1.2.0", "twine>=5.0.0"],
         "ui": ["streamlit>=1.12,<2.0", "altair<5"],
         "docling": ["docling>=2.70.0; python_version >= '3.10'"],
         "faiss": ["faiss-cpu>=1.8.0"],
@@ -31,6 +32,7 @@ setup(
         "sentence-transformers": ["sentence-transformers>=3.0.0"],
         "surya": ["surya-ocr>=0.17.0", "pillow>=10.0.0"],
         "fastembed": ["fastembed>=0.7.0"],
+        "colpali": ["colpali-engine>=0.3.0; python_version >= '3.10'", "pillow>=10.0.0"],
         "unstructured": ["unstructured[pdf]>=0.16.0"],
         "integrations": [
             "faiss-cpu>=1.8.0",

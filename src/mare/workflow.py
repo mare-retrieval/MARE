@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mare.api import MAREApp, load_corpora, load_corpus, load_document
+from mare.extensions import MAREConfig, SUPPORTED_RETRIEVER_STACKS, config_for_retriever_stack
 from mare.integrations import (
     build_all_grounded_findings_payload,
     build_evidence_brief_payload,
@@ -203,6 +204,110 @@ def _build_support_assessment(explanation) -> dict[str, str | float | None]:
     }
 
 
+def _support_rank(support: dict[str, Any]) -> int:
+    return {"none": 0, "weak": 1, "moderate": 2, "strong": 3}.get(str(support.get("status") or ""), 0)
+
+
+def _support_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
+    candidate_rank = _support_rank(candidate)
+    baseline_rank = _support_rank(baseline)
+    if candidate_rank != baseline_rank:
+        return candidate_rank > baseline_rank
+    candidate_score = candidate.get("best_score")
+    baseline_score = baseline.get("best_score")
+    if not isinstance(candidate_score, (int, float)) or not isinstance(baseline_score, (int, float)):
+        return False
+    return candidate_score > baseline_score
+
+
+def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: int = 2) -> list[str]:
+    base_query = " ".join(query.split())
+    candidates = [
+        f"exact evidence for {base_query}",
+        f"section page requirement procedure for {base_query}",
+    ]
+    for question in evidence_brief.get("next_questions") or []:
+        normalized = str(question).strip()
+        if normalized.lower().startswith("find stronger evidence for:"):
+            normalized = normalized.split(":", 1)[1].strip()
+        candidates.append(normalized)
+
+    deduped: list[str] = []
+    seen = {base_query.lower()}
+    for candidate in candidates:
+        normalized = " ".join(candidate.split())
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _serialize_hit(hit) -> dict[str, Any]:
+    return {
+        "doc_id": hit.doc_id,
+        "title": hit.title,
+        "page": hit.page,
+        "score": hit.score,
+        "snippet": hit.snippet,
+        "reason": hit.reason,
+        "page_image_path": hit.page_image_path,
+        "highlight_image_path": hit.highlight_image_path,
+        "object_id": hit.object_id,
+        "object_type": hit.object_type,
+        "metadata": hit.metadata,
+        "citation": format_evidence_citation(title=hit.title, page=hit.page, metadata=hit.metadata),
+    }
+
+
+def _build_evidence_rescue(
+    app: MAREApp,
+    *,
+    query: str,
+    evidence_brief: dict[str, Any],
+    baseline_support: dict[str, Any],
+    top_k: int,
+) -> dict[str, Any]:
+    if baseline_support.get("status") not in {"weak", "none"}:
+        return {
+            "attempted": False,
+            "improved": False,
+            "reason": "Evidence rescue only runs when initial support is weak or missing.",
+            "queries": [],
+            "best_query": "",
+            "support": baseline_support,
+            "results": [],
+        }
+
+    queries = _build_rescue_queries(query, evidence_brief)
+    best_query = ""
+    best_support = baseline_support
+    best_results: list[dict[str, Any]] = []
+    for rescue_query in queries:
+        explanation = app.explain(rescue_query, top_k=top_k)
+        support = _build_support_assessment(explanation)
+        if not _support_improved(support, best_support):
+            continue
+        best_query = rescue_query
+        best_support = support
+        best_results = [_serialize_hit(hit) for hit in explanation.fused_results]
+
+    return {
+        "attempted": True,
+        "improved": bool(best_query),
+        "reason": "Initial support was weak, so MARE tried alternate evidence-seeking queries.",
+        "queries": queries,
+        "best_query": best_query,
+        "support": best_support,
+        "results": best_results,
+    }
+
+
 def _load_app(
     *,
     documents: list[str],
@@ -212,6 +317,7 @@ def _load_app(
     exclude: list[str] | None = None,
     reuse: bool = False,
     parser: str = "builtin",
+    config: MAREConfig | None = None,
 ) -> MAREApp:
     resolved_documents = list(dict.fromkeys(documents))
     resolved_corpora = list(dict.fromkeys(corpora))
@@ -229,6 +335,7 @@ def _load_app(
             output_path=_default_output_path(Path(resolved_documents[0])),
             reuse=reuse,
             parser=parser,
+            config=config,
         )
 
     for source_path in resolved_documents:
@@ -237,14 +344,15 @@ def _load_app(
             output_path=_default_output_path(Path(source_path)),
             reuse=reuse,
             parser=parser,
+            config=config,
         )
         if app.corpus_path is None:
             raise RuntimeError(f"Failed to build a corpus for {source_path}.")
         resolved_corpora.append(str(app.corpus_path))
 
     if len(resolved_corpora) == 1:
-        return load_corpus(resolved_corpora[0])
-    return load_corpora(resolved_corpora)
+        return load_corpus(resolved_corpora[0], config=config)
+    return load_corpora(resolved_corpora, config=config)
 
 
 def _build_workflow_payload(
@@ -261,27 +369,24 @@ def _build_workflow_payload(
     browsed_objects = app.search_objects(query=object_query, object_type=object_type, limit=object_limit)
     explanation = app.explain(query, top_k=top_k)
     support = _build_support_assessment(explanation)
-    retrieval_results = [
-        {
-            "doc_id": hit.doc_id,
-            "title": hit.title,
-            "page": hit.page,
-            "score": hit.score,
-            "snippet": hit.snippet,
-            "reason": hit.reason,
-            "page_image_path": hit.page_image_path,
-            "highlight_image_path": hit.highlight_image_path,
-            "object_id": hit.object_id,
-            "object_type": hit.object_type,
-            "metadata": hit.metadata,
-            "citation": format_evidence_citation(title=hit.title, page=hit.page, metadata=hit.metadata),
-        }
-        for hit in explanation.fused_results
-    ]
+    retrieval_results = [_serialize_hit(hit) for hit in explanation.fused_results]
+    evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
+    evidence_rescue = _build_evidence_rescue(
+        app,
+        query=query,
+        evidence_brief=evidence_brief,
+        baseline_support=support,
+        top_k=top_k,
+    )
+    retrieval_query = query
+    if evidence_rescue.get("improved"):
+        retrieval_query = str(evidence_rescue.get("best_query") or query)
+        support = evidence_rescue.get("support") or support
+        retrieval_results = evidence_rescue.get("results") or retrieval_results
+        evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
     comparison = _build_comparison_view(retrieval_results)
     grounded_summary = build_grounded_summary_payload(retrieval_results)
     findings = build_all_grounded_findings_payload(retrieval_results)
-    evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
     review = build_grounded_review_payload(
         retrieval_results,
         comparison=comparison,
@@ -311,6 +416,7 @@ def _build_workflow_payload(
             },
             "query_corpus": {
                 "query": query,
+                "retrieval_query": retrieval_query,
                 "retriever": {
                     "label": _resolved_retriever_label(app),
                     "note": _retriever_resolution_note(app),
@@ -327,6 +433,7 @@ def _build_workflow_payload(
                 "summary": grounded_summary,
                 "findings": findings,
                 "evidence_brief": evidence_brief,
+                "evidence_rescue": evidence_rescue,
                 "review": review,
                 "support": support,
             },
@@ -369,6 +476,7 @@ def _print_pretty(payload: dict[str, Any]) -> None:
     comparison = query_step.get("comparison", [])
     summary = query_step.get("summary", {})
     evidence_brief = query_step.get("evidence_brief", {})
+    evidence_rescue = query_step.get("evidence_rescue", {})
 
     print("MARE Agent Workflow")
     print("")
@@ -404,6 +512,8 @@ def _print_pretty(payload: dict[str, Any]) -> None:
 
     print("Grounded Retrieval")
     print(f"Query: {query_step['query']}")
+    if query_step.get("retrieval_query") and query_step["retrieval_query"] != query_step["query"]:
+        print(f"Evidence query: {query_step['retrieval_query']}")
     retriever = query_step.get("retriever", {})
     if retriever.get("label"):
         print(f"Retriever: {retriever['label']}")
@@ -423,6 +533,7 @@ def _print_pretty(payload: dict[str, Any]) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    _print_rescue_summary(evidence_rescue)
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
         print(f"Evidence gaps: {gaps[0]}")
@@ -486,6 +597,7 @@ def _print_review(payload: dict[str, Any]) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    _print_rescue_summary(query_step.get("evidence_rescue") or {})
     for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
         print(f"Evidence gap {index}: {item}")
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
@@ -517,6 +629,7 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     print(evidence_brief.get("overview") or "No evidence brief available.")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    _print_rescue_summary(query_step.get("evidence_rescue") or {})
     sources = evidence_brief.get("source_documents") or []
     print(f"Sources: {', '.join(sources) if sources else '[none]'}")
     source_diversity = evidence_brief.get("source_diversity") or {}
@@ -531,6 +644,19 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
     print("")
+
+
+def _print_rescue_summary(evidence_rescue: dict[str, Any]) -> None:
+    if not evidence_rescue.get("attempted"):
+        return
+    if evidence_rescue.get("improved"):
+        support = evidence_rescue.get("support") or {}
+        label = support.get("label") or "stronger support"
+        print(f"Evidence rescue: improved via \"{evidence_rescue.get('best_query')}\" ({label})")
+        return
+    queries = evidence_rescue.get("queries") or []
+    if queries:
+        print(f"Evidence rescue: tried {len(queries)} alternate queries; no stronger support found.")
 
 
 def _default_history_slug(app: MAREApp) -> str:
@@ -604,6 +730,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
+        "--retriever",
+        choices=SUPPORTED_RETRIEVER_STACKS,
+        default="smart",
+        help=(
+            "Retrieval stack to use. Default: smart. "
+            "Use colpali-visual only for corpora with rendered PDF page images."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("pretty", "json"),
         default="pretty",
@@ -632,16 +767,20 @@ def main() -> None:
         exclude=args.exclude,
         reuse=args.reuse,
         parser=args.parser,
+        config=config_for_retriever_stack(args.retriever),
     )
-    payload = _build_workflow_payload(
-        app,
-        query=args.query,
-        object_query=args.object_query or args.query,
-        object_type=args.object_type,
-        top_k=args.top_k,
-        page_limit=args.page_limit,
-        object_limit=args.object_limit,
-    )
+    try:
+        payload = _build_workflow_payload(
+            app,
+            query=args.query,
+            object_query=args.object_query or args.query,
+            object_type=args.object_type,
+            top_k=args.top_k,
+            page_limit=args.page_limit,
+            object_limit=args.object_limit,
+        )
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     if not args.no_history:
         history_store = build_history_store(app, history_file=args.history_file, history_name=args.history_name)
         history_store.append(
