@@ -11,9 +11,7 @@ This repo is set up for both local package builds and GitHub Actions based PyPI 
    - Workflow file: `publish.yml`
    - Environment: `pypi`
 3. In GitHub, keep the `publish.yml` workflow enabled.
-4. Bump the version in:
-   - `pyproject.toml`
-   - `setup.py`
+4. Bump the version in `pyproject.toml`.
 
 ### Trusted publishing troubleshooting
 
@@ -71,7 +69,7 @@ It will publish when:
 
 ## Recommended release flow
 
-1. Update version numbers.
+1. Update the version number in `pyproject.toml`.
 2. Write a release notes file such as `releases/RELEASE_NOTES_0.4.0.md`.
 3. Skim the README install and feature sections so the public story matches the release.
 4. Run the local release check.
