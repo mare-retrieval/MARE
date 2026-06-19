@@ -11,9 +11,11 @@ import mare.ingest as ingest_module
 import pytest
 from mare import (
     BuiltinDocxParser,
+    ColPaliVisualRetriever,
     FAISSIndexer,
     FAISSRetriever,
     FastEmbedReranker,
+    FastEmbedRetriever,
     HybridSemanticRetriever,
     IdentityReranker,
     KeywordBoostReranker,
@@ -25,7 +27,15 @@ from mare import (
     SuryaParser,
     load_document,
 )
-from mare.extensions import BuiltinTextParser, DoclingParser, MAREConfig, UnstructuredParser, get_parser
+from mare.extensions import (
+    BuiltinTextParser,
+    DoclingParser,
+    MAREConfig,
+    UnstructuredParser,
+    config_for_retriever_stack,
+    get_parser,
+    resolve_runtime_config,
+)
 from mare.retrievers.base import BaseRetriever
 from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
 
@@ -465,6 +475,120 @@ def test_fastembed_reranker_uses_cross_encoder_scores(monkeypatch) -> None:
 
     assert [hit.doc_id for hit in reranked] == ["2", "1"]
     assert reranked[0].score == 0.9
+
+
+def test_fastembed_retriever_uses_semantic_similarity(monkeypatch) -> None:
+    class _FakeTextEmbedding:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def embed(self, texts):
+            vectors = []
+            for text in texts:
+                normalized = text.lower()
+                if "adapter" in normalized:
+                    vectors.append([1.0, 0.0])
+                elif "wake on lan" in normalized:
+                    vectors.append([0.0, 1.0])
+                else:
+                    vectors.append([0.5, 0.5])
+            return vectors
+
+    fake_fastembed = types.ModuleType("fastembed")
+    fake_fastembed.TextEmbedding = _FakeTextEmbedding
+    monkeypatch.setitem(sys.modules, "fastembed", fake_fastembed)
+
+    documents = [
+        Document(doc_id="doc-1", title="Manual", page=10, text="Connect the AC adapter to the laptop."),
+        Document(doc_id="doc-2", title="Manual", page=61, text="Wake on LAN feature setup instructions."),
+    ]
+
+    retriever = FastEmbedRetriever(documents)
+    hits = retriever.retrieve("how do I connect the adapter", top_k=2)
+
+    assert len(hits) == 1
+    assert hits[0].doc_id == "doc-1"
+    assert "FastEmbed semantic match" in hits[0].reason
+    assert math.isclose(hits[0].score, 1.0, rel_tol=0.0, abs_tol=1e-6)
+
+
+def test_colpali_visual_retriever_uses_page_image_similarity() -> None:
+    class _FakeModel:
+        device = "cpu"
+
+        def __call__(self, embeddings):
+            return embeddings
+
+    class _FakeProcessor:
+        def process_images(self, images):
+            return {"embeddings": [[1.0, 0.0] if "adapter" in image else [0.0, 1.0] for image in images]}
+
+        def process_queries(self, queries):
+            return {"embeddings": [[1.0, 0.0] if "adapter" in queries[0].lower() else [0.0, 1.0]]}
+
+        def score_multi_vector(self, query_embeddings, image_embeddings):
+            query = query_embeddings[0]
+            return [[sum(left * right for left, right in zip(query, image)) for image in image_embeddings]]
+
+    documents = [
+        Document(
+            doc_id="doc-1",
+            title="Manual",
+            page=10,
+            text="Adapter setup diagram.",
+            page_image_path="adapter-page.png",
+            metadata={"source": "manual.pdf"},
+        ),
+        Document(
+            doc_id="doc-2",
+            title="Manual",
+            page=61,
+            text="Wake on LAN diagram.",
+            page_image_path="wol-page.png",
+            metadata={"source": "manual.pdf"},
+        ),
+    ]
+
+    retriever = ColPaliVisualRetriever(
+        documents,
+        model=_FakeModel(),
+        processor=_FakeProcessor(),
+        image_loader=lambda path: path,
+    )
+    hits = retriever.retrieve("show me the adapter diagram", top_k=2)
+
+    assert len(hits) == 1
+    assert hits[0].doc_id == "doc-1"
+    assert hits[0].modality == Modality.IMAGE
+    assert "ColPali visual page match" in hits[0].reason
+    assert hits[0].metadata["visual_retriever"] == "colpali"
+
+
+def test_colpali_visual_retriever_explains_missing_page_images_without_importing_model() -> None:
+    documents = [Document(doc_id="doc-1", title="Notes", page=1, text="No rendered image.")]
+
+    retriever = ColPaliVisualRetriever(documents)
+
+    with pytest.raises(RuntimeError, match="needs rendered PDF page images"):
+        retriever.retrieve("anything", top_k=1)
+
+
+def test_resolve_runtime_config_prefers_fastembed_when_available(monkeypatch) -> None:
+    monkeypatch.setattr("mare.extensions._module_available", lambda module_name: module_name == "fastembed")
+
+    config = resolve_runtime_config()
+    retriever = config.retriever_factories[Modality.TEXT]([])
+
+    assert isinstance(retriever, FastEmbedRetriever)
+    assert config.retriever_label == "FastEmbed semantic"
+
+
+def test_config_for_retriever_stack_builds_colpali_visual_config() -> None:
+    config = config_for_retriever_stack("colpali-visual")
+    retriever = config.retriever_factories[Modality.TEXT]([])
+
+    assert isinstance(retriever, ColPaliVisualRetriever)
+    assert config.retriever_label == "ColPali visual (Experimental)"
 
 
 def test_qdrant_hybrid_retriever_maps_payloads_to_mare_hits(monkeypatch) -> None:

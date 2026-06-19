@@ -15,6 +15,13 @@ This release sharpens MARE's public position as a grounded document evidence lay
   - evidence gaps
   - next evidence-seeking questions
 - Added `mare workflow --task brief`.
+- Added evidence rescue in workflow and chat: weak or missing initial support now triggers deterministic alternate evidence-seeking queries, and the payload/history records whether stronger proof was found.
+- Added optional FastEmbed semantic retrieval as a lighter ONNX-based first-stage retriever, with smart defaults and the Streamlit selector able to use it when `mare-retrieval[fastembed]` is installed.
+- Added `fastembed` to `mare-eval --stack` so teams can compare built-in, FastEmbed, hybrid, and sentence-transformers retrieval on their own cases.
+- Added eval comparison recommendations that rank stacks and name the best retrieval choice for the current eval set.
+- Added experimental ColPali/ColQwen visual page retrieval behind `mare-retrieval[colpali]`, with Streamlit and eval-stack selection for rendered PDF page images.
+- Added `--retriever` selection to `mare workflow` and `mare chat` for smart, built-in, FastEmbed, hybrid, sentence-transformers, and experimental ColPali visual retrieval stacks.
+- Added a clear ColPali visual-retrieval setup message when a corpus has no rendered PDF page images.
 - Added `:brief` to `mare chat`.
 - Added an Evidence Brief section to the Streamlit playground.
 - Added `examples/evidence_brief_demo.py`.

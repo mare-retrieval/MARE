@@ -7,8 +7,10 @@ from pathlib import Path
 
 from mare.api import MAREApp
 from mare.demo import load_documents
-from mare.extensions import HybridSemanticRetriever, MAREConfig, SentenceTransformersRetriever
-from mare.types import Modality
+from mare.extensions import (
+    SUPPORTED_RETRIEVER_STACKS,
+    config_for_retriever_stack,
+)
 
 
 @dataclass
@@ -60,7 +62,7 @@ class EvalSummary:
         return round(self.no_result_correct / self.total_cases, 4) if self.total_cases else 0.0
 
 
-SUPPORTED_STACKS = ("builtin", "hybrid-semantic", "sentence-transformers")
+SUPPORTED_STACKS = tuple(stack for stack in SUPPORTED_RETRIEVER_STACKS if stack != "smart")
 
 
 def load_eval_cases(path: str | Path) -> list[EvalCase]:
@@ -70,14 +72,8 @@ def load_eval_cases(path: str | Path) -> list[EvalCase]:
 
 
 def create_app_for_stack(documents, stack: str) -> MAREApp:
-    if stack == "builtin":
-        return MAREApp.from_documents(documents)
-    if stack == "hybrid-semantic":
-        config = MAREConfig(retriever_factories={Modality.TEXT: lambda docs: HybridSemanticRetriever(docs)})
-        return MAREApp.from_documents(documents, config=config)
-    if stack == "sentence-transformers":
-        config = MAREConfig(retriever_factories={Modality.TEXT: lambda docs: SentenceTransformersRetriever(docs)})
-        return MAREApp.from_documents(documents, config=config)
+    if stack in SUPPORTED_STACKS:
+        return MAREApp.from_documents(documents, config=config_for_retriever_stack(stack))
     raise ValueError(f"Unsupported stack '{stack}'. Expected one of: {', '.join(SUPPORTED_STACKS)}")
 
 
@@ -160,8 +156,65 @@ def _format_output(summary: EvalSummary, results: list[EvalCaseResult]) -> dict:
     }
 
 
+def _summary_metrics(summary: EvalSummary) -> dict[str, int | float]:
+    return {
+        "total_cases": summary.total_cases,
+        "page_hit_rate": summary.page_hit_rate,
+        "doc_hit_rate": summary.doc_hit_rate,
+        "object_hit_rate": summary.object_hit_rate,
+        "no_result_accuracy": summary.no_result_accuracy,
+    }
+
+
+def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCaseResult]]]) -> dict:
+    if not reports:
+        return {
+            "best_stack": "",
+            "reason": "No stacks were evaluated.",
+            "ranking": [],
+        }
+
+    ranking = []
+    for stack, (summary, _) in reports.items():
+        score = round(
+            (0.4 * summary.page_hit_rate)
+            + (0.3 * summary.doc_hit_rate)
+            + (0.2 * summary.object_hit_rate)
+            + (0.1 * summary.no_result_accuracy),
+            4,
+        )
+        ranking.append(
+            {
+                "stack": stack,
+                "score": score,
+                **_summary_metrics(summary),
+            }
+        )
+
+    ranking.sort(
+        key=lambda item: (
+            item["score"],
+            item["page_hit_rate"],
+            item["doc_hit_rate"],
+            item["object_hit_rate"],
+            item["no_result_accuracy"],
+        ),
+        reverse=True,
+    )
+    best = ranking[0]
+    return {
+        "best_stack": best["stack"],
+        "reason": (
+            f"{best['stack']} had the strongest weighted evidence score "
+            f"({best['score']}) across page, document, object, and no-result checks."
+        ),
+        "ranking": ranking,
+    }
+
+
 def _format_comparison_output(reports: dict[str, tuple[EvalSummary, list[EvalCaseResult]]]) -> dict:
     return {
+        "recommendation": _comparison_recommendation(reports),
         "comparison": {
             stack: {
                 "summary": {

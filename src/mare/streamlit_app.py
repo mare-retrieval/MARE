@@ -39,7 +39,7 @@ PARSER_OPTIONS = {
 RETRIEVER_OPTIONS = {
     "Smart default (Recommended)": {
         "value": "smart",
-        "description": "Automatically prefers hybrid semantic retrieval when available and falls back to MARE's built-in evidence retrieval otherwise.",
+        "description": "Automatically prefers FastEmbed or hybrid semantic retrieval when available and falls back to MARE's built-in evidence retrieval otherwise.",
         "extra": "core",
     },
     "Built-in lexical": {
@@ -56,6 +56,16 @@ RETRIEVER_OPTIONS = {
         "value": "hybrid-semantic",
         "description": "Recommended advanced mode: keeps MARE's lexical/object-aware evidence behavior and adds semantic lift.",
         "extra": "mare-retrieval[sentence-transformers]",
+    },
+    "FastEmbed semantic": {
+        "value": "fastembed",
+        "description": "Lightweight ONNX semantic retrieval using Qdrant/FastEmbed embeddings.",
+        "extra": "mare-retrieval[fastembed]",
+    },
+    "ColPali visual (Experimental)": {
+        "value": "colpali-visual",
+        "description": "Page-image retrieval for visually rich PDFs using ColPali/ColQwen-style models.",
+        "extra": "mare-retrieval[colpali]",
     },
     "FAISS local vector": {
         "value": "faiss",
@@ -615,9 +625,12 @@ def _resolve_retriever_choice(retriever_key: str) -> tuple[str, str]:
 
     if retriever_key != "smart":
         return retriever_key, ""
-    if recommended_retriever_key() == "hybrid-semantic":
+    recommended_key = recommended_retriever_key()
+    if recommended_key == "fastembed":
+        return "fastembed", "Smart default promoted to FastEmbed semantic retrieval."
+    if recommended_key == "hybrid-semantic":
         return "hybrid-semantic", "Smart default promoted to Hybrid semantic + lexical retrieval."
-    return "builtin", "Smart default fell back to Built-in lexical retrieval because sentence-transformers is not installed."
+    return "builtin", "Smart default fell back to Built-in lexical retrieval because FastEmbed and sentence-transformers are not installed."
 
 
 def _retriever_label_for_value(value: str) -> str:
@@ -627,8 +640,10 @@ def _retriever_label_for_value(value: str) -> str:
 def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdrant_url: str, qdrant_collection: str, qdrant_index_before_query: bool):
     from mare.api import MAREApp, load_document
     from mare.extensions import (
+        ColPaliVisualRetriever,
         FAISSRetriever,
         FastEmbedReranker,
+        FastEmbedRetriever,
         HybridSemanticRetriever,
         MAREConfig,
         QdrantHybridRetriever,
@@ -645,6 +660,10 @@ def _build_runtime(parser_key: str, retriever_key: str, reranker_key: str, qdran
         retriever_factories[Modality.TEXT] = lambda documents: SentenceTransformersRetriever(documents)
     elif resolved_retriever_key == "hybrid-semantic":
         retriever_factories[Modality.TEXT] = lambda documents: HybridSemanticRetriever(documents)
+    elif resolved_retriever_key == "fastembed":
+        retriever_factories[Modality.TEXT] = lambda documents: FastEmbedRetriever(documents)
+    elif resolved_retriever_key == "colpali-visual":
+        retriever_factories[Modality.TEXT] = lambda documents: ColPaliVisualRetriever(documents)
     elif resolved_retriever_key == "faiss":
         retriever_factories[Modality.TEXT] = lambda documents: FAISSRetriever(documents)
     elif resolved_retriever_key == "qdrant":

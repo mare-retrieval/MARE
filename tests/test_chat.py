@@ -90,6 +90,49 @@ class _FakeApp:
         )
 
 
+class _WeakThenRescuedApp(_FakeApp):
+    def explain(self, query: str, top_k: int = 3):
+        if query.startswith("exact evidence for"):
+            score = 0.91
+            snippet = "The onboarding checklist requires completing payroll forms before system access."
+            reason = "Matched exact evidence for onboarding checklist requirements."
+        else:
+            score = 0.32
+            snippet = "Onboarding information appears in this packet."
+            reason = "Matched broad onboarding wording."
+
+        return RetrievalExplanation(
+            plan=QueryPlan(
+                query=query,
+                selected_modalities=[Modality.TEXT],
+                discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                confidence=0.8,
+                intent="semantic_lookup",
+                rationale="test",
+            ),
+            per_modality_results={},
+            fused_results=[
+                RetrievalHit(
+                    doc_id="doc-1",
+                    title="Onboarding",
+                    page=3,
+                    modality=Modality.TEXT,
+                    score=score,
+                    reason=reason,
+                    snippet=snippet,
+                    object_id="doc-1:section:1",
+                    object_type="section",
+                    metadata={"source": "employee-onboarding.docx"},
+                ),
+            ],
+        )
+
+
+class _BrokenRetrieverApp(_FakeApp):
+    def explain(self, query: str, top_k: int = 3):
+        raise RuntimeError("ColPali visual retrieval needs rendered PDF page images in the corpus.")
+
+
 def test_discover_folder_inputs(tmp_path: Path) -> None:
     (tmp_path / "manual.pdf").write_text("pdf")
     (tmp_path / "guide.md").write_text("# guide")
@@ -159,6 +202,32 @@ def test_build_app_from_folder_uses_discovered_inputs(monkeypatch, tmp_path: Pat
     assert app is fake_app
 
 
+def test_build_app_from_args_passes_retriever_config(monkeypatch) -> None:
+    fake_app = _FakeApp()
+    seen = {}
+
+    def _fake_load_app(**kwargs):
+        seen.update(kwargs)
+        return fake_app
+
+    monkeypatch.setattr("mare.chat._load_app", _fake_load_app)
+    config = MAREConfig(retriever_label="FastEmbed semantic")
+
+    app = _build_app_from_args(
+        folder=None,
+        documents=["manual.md"],
+        corpora=[],
+        include=[],
+        exclude=[],
+        reuse=True,
+        parser="builtin",
+        config=config,
+    )
+
+    assert app is fake_app
+    assert seen["config"] is config
+
+
 def test_run_chat_answers_question_and_exits(monkeypatch, capsys) -> None:
     answers = iter(["how do I connect the AC adapter", ":quit"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -177,6 +246,17 @@ def test_run_chat_answers_question_and_exits(monkeypatch, capsys) -> None:
     assert "Score: 0.950" in output
     assert "Highlight:" in output
     assert "Other evidence" in output
+
+
+def test_run_chat_prints_retriever_setup_errors_and_continues(monkeypatch, capsys) -> None:
+    answers = iter(["show me the diagram", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_BrokenRetrieverApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "ColPali visual retrieval needs rendered PDF page images in the corpus." in output
+    assert "Traceback" not in output
 
 
 def test_run_chat_supports_json_and_sources(monkeypatch, capsys) -> None:
@@ -373,6 +453,28 @@ def test_run_chat_supports_brief_command(monkeypatch, capsys) -> None:
     assert "Source coverage: Single-source coverage" in output
     assert "Proof assets: snippet, citation, page_image, highlight" in output
     assert "Next question 1:" in output
+
+
+def test_run_chat_shows_and_saves_evidence_rescue(monkeypatch, capsys, tmp_path: Path) -> None:
+    answers = iter(["what onboarding items are required", ":history", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    session_file = tmp_path / "chat-session.json"
+    session_store = build_session_store(
+        _WeakThenRescuedApp(),
+        session_file=str(session_file),
+        session_name="onboarding-session",
+    )
+
+    run_chat(_WeakThenRescuedApp(), top_k=3, page_limit=3, object_limit=5, session_store=session_store)
+    output = capsys.readouterr().out
+    payload = json.loads(session_file.read_text())
+
+    assert "Support: Strong support" in output
+    assert 'Evidence rescue: improved via "exact evidence for what onboarding items are required" (Strong support)' in output
+    assert "The onboarding checklist requires completing payroll forms before system access." in output
+    assert payload["entries"][0]["top_result"]["support"] == "Strong support"
+    assert payload["entries"][0]["top_result"]["evidence_rescue"] == "improved"
+    assert "Evidence rescue: improved" in output
 
 
 def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:

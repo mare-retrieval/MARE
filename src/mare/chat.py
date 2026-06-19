@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 
 from mare.api import MAREApp
+from mare.extensions import MAREConfig, SUPPORTED_RETRIEVER_STACKS, config_for_retriever_stack
 from mare.integrations import format_evidence_citation
-from mare.workflow import _build_workflow_payload, _load_app
+from mare.workflow import _build_workflow_payload, _load_app, _print_rescue_summary
 
 
 _SKIP_DIR_NAMES = {
@@ -68,9 +69,12 @@ class ChatSessionStore:
     def append(self, *, entry_type: str, query: str, payload: dict | None = None) -> None:
         summary: dict[str, str | int | None] = {}
         if payload:
-            results = payload.get("steps", {}).get("query_corpus", {}).get("results", [])
+            query_step = payload.get("steps", {}).get("query_corpus", {})
+            results = query_step.get("results", [])
             best = results[0] if results else None
             if best:
+                support = query_step.get("support") or {}
+                evidence_rescue = query_step.get("evidence_rescue") or {}
                 summary = {
                     "citation": best.get("citation")
                     or format_evidence_citation(
@@ -81,6 +85,8 @@ class ChatSessionStore:
                     "object_type": best.get("object_type") or "page",
                     "page": best.get("page"),
                     "snippet": best.get("snippet") or "",
+                    "support": support.get("label") or "",
+                    "evidence_rescue": _evidence_rescue_history_status(evidence_rescue),
                 }
         self.payload["entries"].append(
             {
@@ -97,6 +103,14 @@ class ChatSessionStore:
         self.payload = self._base_payload()
         self.payload["created_at"] = created_at
         self.save()
+
+
+def _evidence_rescue_history_status(evidence_rescue: dict) -> str:
+    if evidence_rescue.get("improved"):
+        return "improved"
+    if evidence_rescue.get("attempted"):
+        return "attempted"
+    return ""
 
 
 def _matches_patterns(path: Path, folder: Path, patterns: list[str]) -> bool:
@@ -165,6 +179,7 @@ def _build_app_from_args(
     exclude: list[str],
     reuse: bool,
     parser: str,
+    config: MAREConfig | None = None,
 ) -> MAREApp:
     resolved_documents = list(dict.fromkeys(documents))
     resolved_corpora = list(dict.fromkeys(corpora))
@@ -172,7 +187,7 @@ def _build_app_from_args(
         folder_pdfs, folder_corpora = _discover_folder_inputs(Path(folder), include=include, exclude=exclude)
         resolved_documents = list(dict.fromkeys([*resolved_documents, *folder_pdfs]))
         resolved_corpora = list(dict.fromkeys([*resolved_corpora, *folder_corpora]))
-    return _load_app(documents=resolved_documents, corpora=resolved_corpora, reuse=reuse, parser=parser)
+    return _load_app(documents=resolved_documents, corpora=resolved_corpora, reuse=reuse, parser=parser, config=config)
 
 
 def _print_intro(app: MAREApp) -> None:
@@ -238,6 +253,10 @@ def _print_history(session_store: ChatSessionStore) -> None:
             print(f"   Top evidence: {top_result['citation']}")
         if top_result.get("snippet"):
             print(f"   Snippet: {top_result['snippet']}")
+        if top_result.get("support"):
+            print(f"   Support: {top_result['support']}")
+        if top_result.get("evidence_rescue"):
+            print(f"   Evidence rescue: {top_result['evidence_rescue']}")
     print("")
 
 
@@ -373,6 +392,7 @@ def _print_review(payload: dict) -> None:
         print(f"Primary snippet: {best['snippet']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    _print_rescue_summary(query_step.get("evidence_rescue") or {})
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
     finding_counts = review.get("finding_counts", {})
@@ -393,6 +413,7 @@ def _print_evidence_brief(payload: dict) -> None:
     print(evidence_brief.get("overview") or "No evidence brief available.")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    _print_rescue_summary(query_step.get("evidence_rescue") or {})
     sources = evidence_brief.get("source_documents") or []
     print(f"Sources: {', '.join(sources) if sources else '[none]'}")
     source_diversity = evidence_brief.get("source_diversity") or {}
@@ -452,6 +473,7 @@ def _print_answer(payload: dict) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    _print_rescue_summary(query_step.get("evidence_rescue") or {})
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
         print(f"Evidence gaps: {gaps[0]}")
@@ -464,6 +486,30 @@ def _print_answer(payload: dict) -> None:
     print(f"Highlight: {best['highlight_image_path'] or '[no highlight available]'}")
     print("")
     _print_top_results(results)
+
+
+def _build_chat_payload(
+    app: MAREApp,
+    *,
+    query: str,
+    top_k: int,
+    page_limit: int,
+    object_limit: int,
+) -> dict | None:
+    try:
+        return _build_workflow_payload(
+            app,
+            query=query,
+            object_query=query,
+            object_type=None,
+            top_k=top_k,
+            page_limit=page_limit,
+            object_limit=object_limit,
+        )
+    except RuntimeError as exc:
+        print(str(exc))
+        print("")
+        return None
 
 
 def _default_session_slug(app: MAREApp) -> str:
@@ -538,15 +584,9 @@ def run_chat(
                 print("Usage: :compare <question>")
                 print("")
                 continue
-            payload = _build_workflow_payload(
-                app,
-                query=query,
-                object_query=query,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             _print_comparison(payload)
             if session_store is not None:
                 session_store.append(entry_type="compare", query=query, payload=payload)
@@ -557,15 +597,9 @@ def run_chat(
                 print("Usage: :summary <question>")
                 print("")
                 continue
-            payload = _build_workflow_payload(
-                app,
-                query=query,
-                object_query=query,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             _print_summary(payload)
             if session_store is not None:
                 session_store.append(entry_type="summary", query=query, payload=payload)
@@ -576,15 +610,9 @@ def run_chat(
                 print("Usage: :brief <question>")
                 print("")
                 continue
-            payload = _build_workflow_payload(
-                app,
-                query=query,
-                object_query=query,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             _print_evidence_brief(payload)
             if session_store is not None:
                 session_store.append(entry_type="brief", query=query, payload=payload)
@@ -595,15 +623,9 @@ def run_chat(
                 print("Usage: :review <question>")
                 print("")
                 continue
-            payload = _build_workflow_payload(
-                app,
-                query=query,
-                object_query=query,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             _print_review(payload)
             if session_store is not None:
                 session_store.append(entry_type="review", query=query, payload=payload)
@@ -624,15 +646,9 @@ def run_chat(
                 print("Usage: :json <question>")
                 print("")
                 continue
-            payload = _build_workflow_payload(
-                app,
-                query=query,
-                object_query=query,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             print(json.dumps(payload, indent=2))
             print("")
             if session_store is not None:
@@ -646,29 +662,17 @@ def run_chat(
                     print(f"Usage: {prefix} <question>")
                     print("")
                     break
-                payload = _build_workflow_payload(
-                    app,
-                    query=query,
-                    object_query=query,
-                    object_type=None,
-                    top_k=top_k,
-                    page_limit=page_limit,
-                    object_limit=object_limit,
-                )
+                payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+                if payload is None:
+                    break
                 _print_findings(payload, command_name)
                 if session_store is not None:
                     session_store.append(entry_type=command_name, query=query, payload=payload)
                 break
         else:
-            payload = _build_workflow_payload(
-                app,
-                query=raw,
-                object_query=raw,
-                object_type=None,
-                top_k=top_k,
-                page_limit=page_limit,
-                object_limit=object_limit,
-            )
+            payload = _build_chat_payload(app, query=raw, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
             _print_answer(payload)
             if session_store is not None:
                 session_store.append(entry_type="ask", query=raw, payload=payload)
@@ -707,6 +711,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
+    parser.add_argument(
+        "--retriever",
+        choices=SUPPORTED_RETRIEVER_STACKS,
+        default="smart",
+        help=(
+            "Retrieval stack to use. Default: smart. "
+            "Use colpali-visual only for corpora with rendered PDF page images."
+        ),
+    )
     parser.add_argument("--top-k", type=int, default=3, help="How many retrieval hits to consider")
     parser.add_argument("--page-limit", type=int, default=3, help="How many pages to include in summaries")
     parser.add_argument("--object-limit", type=int, default=5, help="How many objects to include in summaries")
@@ -727,6 +740,7 @@ def main() -> None:
         exclude=args.exclude,
         reuse=args.reuse,
         parser=args.parser,
+        config=config_for_retriever_stack(args.retriever),
     )
     session_store = None
     if not args.no_history:
