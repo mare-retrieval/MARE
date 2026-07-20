@@ -5,6 +5,7 @@ import types
 
 from mare import MAREApp
 from mare.integrations import (
+    build_agent_contract_payload,
     build_all_grounded_findings_payload,
     build_evidence_brief_payload,
     build_grounded_findings_payload,
@@ -90,6 +91,11 @@ def test_hits_to_evidence_payload_preserves_result_fields() -> None:
     assert payload["evidence_brief"]["support"]["status"] == "strong"
     assert payload["evidence_brief"]["source_count"] == 2
     assert payload["evidence_brief"]["source_diversity"]["status"] == "broad"
+    assert payload["evidence_brief"]["research_plan"]["status"] == "ready"
+    assert payload["evidence_brief"]["research_plan"]["steps"][0]["action"] == "answer_with_citations"
+    assert payload["agent_contract"]["schema_version"] == "mare.agent_contract.v1"
+    assert payload["agent_contract"]["may_answer"] is True
+    assert payload["agent_contract"]["recommended_action"] == "answer_with_citations"
     assert payload["review"]["evidence_brief"]["overview"].startswith("Strong support")
 
 
@@ -125,6 +131,8 @@ def test_build_evidence_brief_payload_flags_gaps_and_next_questions() -> None:
     assert "snippet" in brief["available_proof_assets"]
     assert any("highlighted visual proof" in gap for gap in brief["evidence_gaps"])
     assert brief["next_questions"]
+    assert brief["research_plan"]["status"] == "needs_stronger_support"
+    assert brief["research_plan"]["steps"][0]["action"] == "retrieve_stronger_support"
 
 
 def test_build_evidence_brief_payload_detects_conflict_hints() -> None:
@@ -155,9 +163,79 @@ def test_build_evidence_brief_payload_detects_conflict_hints() -> None:
 
     assert brief["source_diversity"]["status"] == "broad"
     assert brief["conflict_hints"][0]["type"] == "requirement_vs_optional"
+    assert brief["research_plan"]["status"] == "needs_conflict_check"
+    assert brief["research_plan"]["steps"][0]["action"] == "resolve_conflicts"
     assert "Potentially conflicting evidence signals" in brief["evidence_gaps"][0] or any(
         "Potentially conflicting evidence signals" in gap for gap in brief["evidence_gaps"]
     )
+
+
+def test_build_evidence_brief_payload_builds_source_discovery_plan_for_no_results() -> None:
+    brief = build_evidence_brief_payload("required onboarding forms", [])
+    contract = build_agent_contract_payload(brief)
+
+    assert brief["research_plan"]["status"] == "needs_evidence"
+    assert brief["research_plan"]["step_count"] == 3
+    assert brief["research_plan"]["steps"][0]["action"] == "discover_sources"
+    assert brief["research_plan"]["steps"][1]["action"] == "retrieve_exact_support"
+    assert "required onboarding forms" in brief["research_plan"]["steps"][0]["query"]
+    assert contract["recommended_action"] == "discover_sources"
+    assert contract["may_answer"] is False
+    assert "needs_evidence" in contract["stop_reasons"]
+
+
+def test_build_agent_contract_payload_blocks_weak_or_conflicting_evidence() -> None:
+    weak_brief = build_evidence_brief_payload(
+        "connect the adapter",
+        [
+            {
+                "citation": "manual.pdf | page 4",
+                "title": "Manual",
+                "page": 4,
+                "score": 0.52,
+                "object_type": "section",
+                "snippet": "Connect the AC adapter before powering on.",
+                "reason": "Matched setup wording",
+                "metadata": {"source": "manual.pdf"},
+            }
+        ],
+    )
+    weak_contract = build_agent_contract_payload(weak_brief)
+
+    assert weak_contract["may_answer"] is False
+    assert weak_contract["recommended_action"] == "retrieve_stronger_support"
+    assert "support_not_sufficient" in weak_contract["stop_reasons"]
+
+    conflict_brief = build_evidence_brief_payload(
+        "is acknowledgement required",
+        [
+            {
+                "citation": "policy.pdf | page 2",
+                "title": "Policy",
+                "page": 2,
+                "score": 0.91,
+                "object_type": "section",
+                "snippet": "Employees must submit the acknowledgement.",
+                "reason": "Matched requirement language",
+                "metadata": {"source": "policy.pdf"},
+            },
+            {
+                "citation": "faq.md | line 8",
+                "title": "FAQ",
+                "page": 1,
+                "score": 0.88,
+                "object_type": "section",
+                "snippet": "The acknowledgement is optional for returning employees.",
+                "reason": "Matched optional language",
+                "metadata": {"source": "faq.md"},
+            },
+        ],
+    )
+    conflict_contract = build_agent_contract_payload(conflict_brief)
+
+    assert conflict_contract["may_answer"] is False
+    assert conflict_contract["recommended_action"] == "resolve_conflicts"
+    assert "conflict_hints_present" in conflict_contract["stop_reasons"]
 
 
 def test_build_grounded_findings_payload_extracts_actions_and_requirements() -> None:

@@ -75,6 +75,7 @@ class ChatSessionStore:
             if best:
                 support = query_step.get("support") or {}
                 evidence_rescue = query_step.get("evidence_rescue") or {}
+                agent_contract = query_step.get("agent_contract") or {}
                 summary = {
                     "citation": best.get("citation")
                     or format_evidence_citation(
@@ -87,6 +88,7 @@ class ChatSessionStore:
                     "snippet": best.get("snippet") or "",
                     "support": support.get("label") or "",
                     "evidence_rescue": _evidence_rescue_history_status(evidence_rescue),
+                    "agent_action": agent_contract.get("recommended_action") or "",
                 }
         self.payload["entries"].append(
             {
@@ -198,7 +200,7 @@ def _print_intro(app: MAREApp) -> None:
         print(f"Loaded documents: {', '.join(source_documents)}")
     if app.corpus_paths:
         print(f"Loaded corpora: {', '.join(str(path) for path in app.corpus_paths)}")
-    print("Type a question, or use :help, :brief, :review, :sources, :actions, :requirements, :risks, :deadlines, :json <question>, :quit")
+    print("Type a question, or use :help, :brief, :contract, :review, :sources, :actions, :requirements, :risks, :deadlines, :json <question>, :quit")
     print("")
 
 
@@ -208,6 +210,7 @@ def _print_help() -> None:
     print(":brief ... Show support strength, evidence gaps, proof assets, and next questions")
     print(":clear-history Clear saved session history for this chat session")
     print(":compare .. Compare grounded evidence across top matches for the rest of the line")
+    print(":contract Show the compact agent action contract for the rest of the line")
     print(":deadlines Extract deadlines and due-date language for the rest of the line")
     print(":help      Show this help")
     print(":history    Show recent saved session history")
@@ -255,6 +258,8 @@ def _print_history(session_store: ChatSessionStore) -> None:
             print(f"   Snippet: {top_result['snippet']}")
         if top_result.get("support"):
             print(f"   Support: {top_result['support']}")
+        if top_result.get("agent_action"):
+            print(f"   Agent action: {top_result['agent_action']}")
         if top_result.get("evidence_rescue"):
             print(f"   Evidence rescue: {top_result['evidence_rescue']}")
     print("")
@@ -392,6 +397,12 @@ def _print_review(payload: dict) -> None:
         print(f"Primary snippet: {best['snippet']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
@@ -421,12 +432,46 @@ def _print_evidence_brief(payload: dict) -> None:
         print(f"Source coverage: {source_diversity['label']}")
     proof_assets = evidence_brief.get("available_proof_assets") or []
     print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    if agent_contract.get("stop_reasons"):
+        print(f"Stop reasons: {', '.join(agent_contract['stop_reasons'])}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
+    for index, item in enumerate(research_plan.get("steps") or [], start=1):
+        print(f"Research step {index}: {item.get('action') or 'follow_up'} | {item.get('query') or '[no query]'}")
     for index, item in enumerate(evidence_brief.get("conflict_hints") or [], start=1):
         print(f"Conflict hint {index}: {item.get('message') or '[no message]'}")
     for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
         print(f"Evidence gap {index}: {item}")
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
+    print("")
+
+
+def _print_agent_contract(payload: dict) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    contract = query_step.get("agent_contract") or {}
+    research_plan = contract.get("research_plan") or {}
+    print(f"Agent contract query: {query_step['query']}")
+    if not contract:
+        print("No agent contract available.")
+        print("")
+        return
+    print(f"Schema: {contract.get('schema_version') or '[unknown]'}")
+    print(f"May answer: {'yes' if contract.get('may_answer') else 'no'}")
+    print(f"Recommended action: {contract.get('recommended_action') or '[unknown]'}")
+    print(f"Support: {contract.get('support_status') or '[unknown]'}")
+    print(f"Source coverage: {contract.get('source_coverage_status') or '[unknown]'}")
+    print(f"Research status: {contract.get('research_status') or '[unknown]'}")
+    stop_reasons = contract.get("stop_reasons") or []
+    print(f"Stop reasons: {', '.join(stop_reasons) if stop_reasons else '[none]'}")
+    if research_plan.get("rationale"):
+        print(f"Rationale: {research_plan['rationale']}")
+    for index, item in enumerate(research_plan.get("steps") or [], start=1):
+        print(f"Research step {index}: {item.get('action') or 'follow_up'} | {item.get('query') or '[no query]'}")
     print("")
 
 
@@ -473,6 +518,12 @@ def _print_answer(payload: dict) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
@@ -616,6 +667,19 @@ def run_chat(
             _print_evidence_brief(payload)
             if session_store is not None:
                 session_store.append(entry_type="brief", query=query, payload=payload)
+            continue
+        if raw.startswith(":contract"):
+            query = raw[len(":contract") :].strip()
+            if not query:
+                print("Usage: :contract <question>")
+                print("")
+                continue
+            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            if payload is None:
+                continue
+            _print_agent_contract(payload)
+            if session_store is not None:
+                session_store.append(entry_type="contract", query=query, payload=payload)
             continue
         if raw.startswith(":review"):
             query = raw[len(":review") :].strip()

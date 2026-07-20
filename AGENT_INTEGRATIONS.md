@@ -24,6 +24,8 @@ MARE gives those agents:
 - conflict hints
 - evidence gaps
 - next evidence-seeking questions
+- research plans for the next retrieval move
+- an `agent_contract` with the recommended action and stop reasons
 - JSON payloads that are easy for agents to inspect
 
 ## Option 1: Shell Tool
@@ -34,10 +36,16 @@ Use this when your agent can run commands.
 mare workflow --folder ./docs --query "what should I do before onboarding is complete?" --task brief --format json
 ```
 
+For a compact human-readable action contract:
+
+```bash
+mare workflow --folder ./docs --query "what should I do before onboarding is complete?" --task contract
+```
+
 Recommended agent tool description:
 
 ```text
-Use MARE when you need grounded evidence from local documents. Pass a concise question and the document folder. Read the evidence_brief before acting. If support is weak, source coverage is single-source, conflict_hints are present, or evidence_gaps are non-empty, ask a narrower follow-up question or show the user the citations instead of acting autonomously.
+Use MARE when you need grounded evidence from local documents. Pass a concise question and the document folder. Read agent_contract before acting. If may_answer is false, follow recommended_action or show the user the citations instead of acting autonomously. Use evidence_brief for detailed support, source coverage, conflict hints, gaps, and proof assets.
 ```
 
 Recommended policy:
@@ -83,6 +91,8 @@ hits = app.retrieve(query, top_k=3)
 payload = hits_to_evidence_payload(query, hits)
 
 brief = payload["evidence_brief"]
+contract = payload["agent_contract"]
+print(contract["recommended_action"])
 print(brief["support"]["status"])
 print(brief["source_diversity"]["label"])
 print(brief["evidence_gaps"])
@@ -107,7 +117,7 @@ mare workflow --folder "{{folder}}" --query "{{query}}" --task brief --format js
 Suggested skill instructions:
 
 ```text
-When a task depends on a local document, manual, policy, SOP, contract, or support note, call mare_document_evidence before answering. Use the returned evidence_brief to decide whether the evidence is strong enough. If conflict_hints are present, summarize the conflict and ask the user before taking action. If source coverage is single-source, mention that the answer is based on one source.
+When a task depends on a local document, manual, policy, SOP, contract, or support note, call mare_document_evidence before answering. Use the returned agent_contract first. If may_answer is false, follow recommended_action or ask the user. Use evidence_brief for citations, gaps, source coverage, and conflict details. If conflict_hints are present, summarize the conflict and ask the user before taking action. If source coverage is single-source, mention that the answer is based on one source.
 ```
 
 Good OpenClaw use cases:
@@ -132,8 +142,8 @@ Skill behavior:
 ```text
 Input: folder path and user question.
 Run MARE with --task brief --format json.
-Return the evidence_brief, top citation, top snippet, and next_questions.
-If support is weak, run one follow-up query from next_questions before finalizing.
+Return the agent_contract, evidence_brief, top citation, top snippet, and research_plan.
+If agent_contract.recommended_action is retrieve_stronger_support, run the first research_plan step before finalizing.
 If conflict_hints exist, present the conflict to the user and avoid autonomous action.
 ```
 
@@ -157,6 +167,8 @@ Agents that can act on external systems need evidence boundaries.
 Recommended rules:
 
 - Treat citations and snippets as required for document-grounded claims.
+- Read `agent_contract` before acting.
+- Treat `agent_contract.may_answer == false` as a stop-and-check condition.
 - Treat `support.status == "weak"` as a stop-and-ask condition.
 - Treat `conflict_hints` as a stop-and-compare condition.
 - Treat `source_diversity.status == "single_source"` as a disclosure condition.
@@ -167,7 +179,7 @@ Recommended rules:
 Best line:
 
 ```text
-MARE gives OpenClaw, Hermes, and other agents a local document evidence layer: exact citations, snippets, source coverage, support strength, conflict hints, gaps, and next questions.
+MARE gives OpenClaw, Hermes, and other agents a local document evidence layer: exact citations, snippets, source coverage, support strength, conflict hints, gaps, research plans, and an action contract.
 ```
 
 Avoid saying MARE is a native OpenClaw or Hermes plugin unless that plugin has actually been packaged and tested.

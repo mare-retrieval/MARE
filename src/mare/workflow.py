@@ -11,6 +11,7 @@ from mare.api import MAREApp, load_corpora, load_corpus, load_document
 from mare.extensions import MAREConfig, SUPPORTED_RETRIEVER_STACKS, config_for_retriever_stack
 from mare.integrations import (
     build_all_grounded_findings_payload,
+    build_agent_contract_payload,
     build_evidence_brief_payload,
     build_grounded_review_payload,
     build_grounded_summary_payload,
@@ -85,6 +86,7 @@ class WorkflowHistoryStore:
                 "output_format": output_format,
                 "intent": query_step["plan"]["intent"],
                 "result_count": len(results),
+                "agent_action": (query_step.get("agent_contract") or {}).get("recommended_action") or "",
                 "top_result": (
                     {
                         "citation": best.get("citation") or "",
@@ -279,6 +281,7 @@ def _build_evidence_rescue(
             "improved": False,
             "reason": "Evidence rescue only runs when initial support is weak or missing.",
             "queries": [],
+            "attempts": [],
             "best_query": "",
             "support": baseline_support,
             "results": [],
@@ -288,20 +291,35 @@ def _build_evidence_rescue(
     best_query = ""
     best_support = baseline_support
     best_results: list[dict[str, Any]] = []
+    attempts: list[dict[str, Any]] = []
     for rescue_query in queries:
         explanation = app.explain(rescue_query, top_k=top_k)
         support = _build_support_assessment(explanation)
-        if not _support_improved(support, best_support):
+        results = [_serialize_hit(hit) for hit in explanation.fused_results]
+        improved = _support_improved(support, best_support)
+        best = results[0] if results else {}
+        attempts.append(
+            {
+                "query": rescue_query,
+                "support": support,
+                "result_count": len(results),
+                "top_citation": best.get("citation") or "",
+                "top_score": best.get("score"),
+                "improved": improved,
+            }
+        )
+        if not improved:
             continue
         best_query = rescue_query
         best_support = support
-        best_results = [_serialize_hit(hit) for hit in explanation.fused_results]
+        best_results = results
 
     return {
         "attempted": True,
         "improved": bool(best_query),
         "reason": "Initial support was weak, so MARE tried alternate evidence-seeking queries.",
         "queries": queries,
+        "attempts": attempts,
         "best_query": best_query,
         "support": best_support,
         "results": best_results,
@@ -384,6 +402,7 @@ def _build_workflow_payload(
         support = evidence_rescue.get("support") or support
         retrieval_results = evidence_rescue.get("results") or retrieval_results
         evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
+    agent_contract = build_agent_contract_payload(evidence_brief)
     comparison = _build_comparison_view(retrieval_results)
     grounded_summary = build_grounded_summary_payload(retrieval_results)
     findings = build_all_grounded_findings_payload(retrieval_results)
@@ -433,6 +452,7 @@ def _build_workflow_payload(
                 "summary": grounded_summary,
                 "findings": findings,
                 "evidence_brief": evidence_brief,
+                "agent_contract": agent_contract,
                 "evidence_rescue": evidence_rescue,
                 "review": review,
                 "support": support,
@@ -533,6 +553,12 @@ def _print_pretty(payload: dict[str, Any]) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(evidence_rescue)
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
@@ -597,6 +623,12 @@ def _print_review(payload: dict[str, Any]) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
     for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
         print(f"Evidence gap {index}: {item}")
@@ -637,12 +669,46 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
         print(f"Source coverage: {source_diversity['label']}")
     proof_assets = evidence_brief.get("available_proof_assets") or []
     print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
+    agent_contract = query_step.get("agent_contract") or {}
+    if agent_contract.get("recommended_action"):
+        print(f"Agent action: {agent_contract['recommended_action']}")
+    if agent_contract.get("stop_reasons"):
+        print(f"Stop reasons: {', '.join(agent_contract['stop_reasons'])}")
+    research_plan = evidence_brief.get("research_plan") or {}
+    if research_plan.get("status"):
+        print(f"Research plan: {research_plan['status']}")
+    for index, item in enumerate(research_plan.get("steps") or [], start=1):
+        print(f"Research step {index}: {item.get('action') or 'follow_up'} | {item.get('query') or '[no query]'}")
     for index, item in enumerate(evidence_brief.get("conflict_hints") or [], start=1):
         print(f"Conflict hint {index}: {item.get('message') or '[no message]'}")
     for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
         print(f"Evidence gap {index}: {item}")
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
+    print("")
+
+
+def _print_agent_contract(payload: dict[str, Any]) -> None:
+    query_step = payload["steps"]["query_corpus"]
+    contract = query_step.get("agent_contract") or {}
+    research_plan = contract.get("research_plan") or {}
+    print(f"Agent contract query: {query_step['query']}")
+    if not contract:
+        print("No agent contract available.")
+        print("")
+        return
+    print(f"Schema: {contract.get('schema_version') or '[unknown]'}")
+    print(f"May answer: {'yes' if contract.get('may_answer') else 'no'}")
+    print(f"Recommended action: {contract.get('recommended_action') or '[unknown]'}")
+    print(f"Support: {contract.get('support_status') or '[unknown]'}")
+    print(f"Source coverage: {contract.get('source_coverage_status') or '[unknown]'}")
+    print(f"Research status: {contract.get('research_status') or '[unknown]'}")
+    stop_reasons = contract.get("stop_reasons") or []
+    print(f"Stop reasons: {', '.join(stop_reasons) if stop_reasons else '[none]'}")
+    if research_plan.get("rationale"):
+        print(f"Rationale: {research_plan['rationale']}")
+    for index, item in enumerate(research_plan.get("steps") or [], start=1):
+        print(f"Research step {index}: {item.get('action') or 'follow_up'} | {item.get('query') or '[no query]'}")
     print("")
 
 
@@ -746,7 +812,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--task",
-        choices=("answer", "brief", "review", "compare", "summary", "actions", "requirements", "risks", "deadlines"),
+        choices=(
+            "answer",
+            "brief",
+            "contract",
+            "review",
+            "compare",
+            "summary",
+            "actions",
+            "requirements",
+            "risks",
+            "deadlines",
+        ),
         default="answer",
         help="Optional user-facing task view to print in pretty mode. JSON output always includes the full payload.",
     )
@@ -794,6 +871,9 @@ def main() -> None:
         return
     if args.task == "brief":
         _print_evidence_brief(payload)
+        return
+    if args.task == "contract":
+        _print_agent_contract(payload)
         return
     if args.task == "review":
         _print_review(payload)

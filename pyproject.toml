@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mare-retrieval"
-version = "0.4.5"
+version = "0.4.6"
 description = "Grounded document evidence engine for agents and developers that returns citations, snippets, highlights, source coverage, support strength, conflict hints, evidence gaps, and next questions."
 readme = "README.md"
 requires-python = ">=3.9"

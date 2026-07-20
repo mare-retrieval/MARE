@@ -545,6 +545,7 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
     source_diversity = evidence_brief.get("source_diversity") or {}
     sources = evidence_brief.get("source_documents") or []
     proof_assets = evidence_brief.get("available_proof_assets") or []
+    research_plan = evidence_brief.get("research_plan") or {}
     st.markdown(
         f"""
         <div class="mare-card" style="margin-bottom:0.9rem;">
@@ -554,6 +555,7 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
           <p class="mare-mini"><strong>Source coverage:</strong> {source_diversity.get('label') or '[unknown]'}</p>
           <p class="mare-mini"><strong>Sources:</strong> {', '.join(sources) if sources else '[none]'}</p>
           <p class="mare-mini"><strong>Proof assets:</strong> {', '.join(proof_assets) if proof_assets else '[none]'}</p>
+          <p class="mare-mini"><strong>Research plan:</strong> {research_plan.get('status') or '[none]'}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -573,6 +575,35 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
         st.markdown("**Conflict hints**")
         for item in conflict_hints:
             st.caption(item.get("message") or "Potentially conflicting evidence signals were detected.")
+    if research_plan.get("steps"):
+        st.markdown("**Research plan**")
+        for item in research_plan.get("steps") or []:
+            action = item.get("action") or "follow_up"
+            query = item.get("query") or "[no query]"
+            st.caption(f"{action}: {query}")
+
+
+def _render_agent_contract(st, agent_contract: dict) -> None:
+    st.subheader("Agent Contract")
+    if not agent_contract:
+        st.caption("No agent contract is available for this run.")
+        return
+
+    may_answer = "yes" if agent_contract.get("may_answer") else "no"
+    stop_reasons = agent_contract.get("stop_reasons") or []
+    st.markdown(
+        f"""
+        <div class="mare-card" style="margin-bottom:0.9rem;">
+          <div class="mare-label">Action Signal</div>
+          <div class="mare-value">{agent_contract.get('recommended_action') or '[unknown]'}</div>
+          <p class="mare-mini" style="margin-top:0.55rem;"><strong>May answer:</strong> {may_answer}</p>
+          <p class="mare-mini"><strong>Support:</strong> {agent_contract.get('support_status') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Source coverage:</strong> {agent_contract.get('source_coverage_status') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Stop reasons:</strong> {', '.join(stop_reasons) if stop_reasons else '[none]'}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _render_review_snapshot(st, review: dict) -> None:
@@ -822,6 +853,7 @@ def _run_query(st, uploaded_files, query: str, top_k: int, stack_controls: dict)
         "grounded_summary": evidence_payload.get("summary", {"overview": "No grounded evidence found.", "highlight_count": 0, "highlights": []}),
         "grounded_findings": evidence_payload.get("findings", {}),
         "evidence_brief": evidence_payload.get("evidence_brief", {}),
+        "agent_contract": evidence_payload.get("agent_contract", {}),
         "grounded_review": evidence_payload.get("review", {}),
         "filenames": [item.name for item in uploaded_sources],
         "app": app,
@@ -1088,6 +1120,9 @@ def main() -> None:
 
     st.markdown("")
     _render_evidence_brief(st, result.get("evidence_brief") or {})
+
+    st.markdown("")
+    _render_agent_contract(st, result.get("agent_contract") or {})
 
     st.markdown("")
     _render_review_snapshot(st, result.get("grounded_review") or {})

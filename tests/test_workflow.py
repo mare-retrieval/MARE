@@ -12,6 +12,7 @@ from mare.workflow import (
     _default_output_path,
     _discover_folder_inputs,
     _load_app,
+    _print_agent_contract,
     _print_evidence_brief,
     _print_findings,
     _print_review,
@@ -252,8 +253,12 @@ def test_build_workflow_payload_returns_agent_shape() -> None:
     assert payload["steps"]["query_corpus"]["retriever"]["label"] == "Hybrid semantic + lexical"
     assert payload["steps"]["query_corpus"]["support"]["status"] == "strong"
     assert payload["steps"]["query_corpus"]["evidence_brief"]["source_count"] == 2
+    assert payload["steps"]["query_corpus"]["evidence_brief"]["research_plan"]["status"] == "ready"
+    assert payload["steps"]["query_corpus"]["agent_contract"]["may_answer"] is True
+    assert payload["steps"]["query_corpus"]["agent_contract"]["recommended_action"] == "answer_with_citations"
     assert payload["steps"]["query_corpus"]["review"]["evidence_brief"]["support"]["status"] == "strong"
     assert payload["steps"]["query_corpus"]["evidence_rescue"]["attempted"] is False
+    assert payload["steps"]["query_corpus"]["evidence_rescue"]["attempts"] == []
 
 
 def test_build_workflow_payload_rescues_weak_evidence() -> None:
@@ -274,6 +279,11 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     assert query_step["evidence_rescue"]["attempted"] is True
     assert query_step["evidence_rescue"]["improved"] is True
     assert query_step["evidence_rescue"]["best_query"] == "exact evidence for what onboarding items are required"
+    assert query_step["evidence_rescue"]["attempts"][0]["query"] == "exact evidence for what onboarding items are required"
+    assert query_step["evidence_rescue"]["attempts"][0]["improved"] is True
+    assert query_step["evidence_rescue"]["attempts"][0]["top_citation"] == "employee-onboarding.docx | page 3"
+    assert query_step["agent_contract"]["may_answer"] is True
+    assert query_step["agent_contract"]["recommended_action"] == "answer_with_citations"
 
 
 def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
@@ -296,6 +306,8 @@ def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
     assert "Retriever: Hybrid semantic + lexical" in output
     assert "Support: Strong support" in output
     assert "Evidence brief: Strong support from 2 retrieved results across 2 sources." in output
+    assert "Agent action: answer_with_citations" in output
+    assert "Research plan: ready" in output
     assert "Next question:" in output
     assert "Summary: Found 2 grounded results across 2 sources." in output
     assert "Citation: manual.pdf | page 10" in output
@@ -364,7 +376,33 @@ def test_print_evidence_brief_shows_trust_view(capsys) -> None:
     assert "Sources: manual.pdf, guide.docx" in output
     assert "Source coverage: Broad source coverage" in output
     assert "Proof assets: snippet, citation, page_image, highlight" in output
+    assert "Agent action: answer_with_citations" in output
+    assert "Research plan: ready" in output
+    assert "Research step 1: answer_with_citations | connect the adapter" in output
     assert "Next question 1:" in output
+
+
+def test_print_agent_contract_shows_compact_action_view(capsys) -> None:
+    payload = _build_workflow_payload(
+        _FakeApp(),
+        query="connect the adapter",
+        object_query="adapter",
+        object_type="procedure",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+
+    _print_agent_contract(payload)
+    output = capsys.readouterr().out
+
+    assert "Agent contract query: connect the adapter" in output
+    assert "Schema: mare.agent_contract.v1" in output
+    assert "May answer: yes" in output
+    assert "Recommended action: answer_with_citations" in output
+    assert "Research status: ready" in output
+    assert "Stop reasons: [none]" in output
+    assert "Research step 1: answer_with_citations | connect the adapter" in output
 
 
 def test_workflow_history_store_persists_runs(tmp_path: Path) -> None:
@@ -386,6 +424,7 @@ def test_workflow_history_store_persists_runs(tmp_path: Path) -> None:
     assert saved["history_name"] == "ops-review"
     assert len(saved["runs"]) == 1
     assert saved["runs"][0]["query"] == "connect the adapter"
+    assert saved["runs"][0]["agent_action"] == "answer_with_citations"
     assert saved["runs"][0]["top_result"]["citation"] == "manual.pdf | page 10"
     assert saved["runs"][0]["top_result"]["object_type"] == "procedure"
 
