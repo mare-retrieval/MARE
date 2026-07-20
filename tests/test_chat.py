@@ -241,6 +241,7 @@ def test_run_chat_answers_question_and_exits(monkeypatch, capsys) -> None:
     assert "Retriever: Hybrid semantic + lexical" in output
     assert "Confidence: 0.800" in output
     assert "Support: Strong support" in output
+    assert "Agent action: compare_sources" in output
     assert "Best page: 10" in output
     assert "Citation: manual.pdf | page 10" in output
     assert "Score: 0.950" in output
@@ -306,6 +307,21 @@ def test_run_chat_supports_compare_command(monkeypatch, capsys) -> None:
     assert "1. manual.pdf | page 10 | procedure | score=0.950" in output
     assert "2. manual.pdf | page 11 | procedure | score=0.720" in output
     assert "Reason: Matched setup instruction wording." in output
+
+
+def test_run_chat_supports_contract_command(monkeypatch, capsys) -> None:
+    answers = iter([":contract connect the adapter", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    run_chat(_FakeApp(), top_k=3, page_limit=3, object_limit=5)
+    output = capsys.readouterr().out
+
+    assert "Agent contract query: connect the adapter" in output
+    assert "Schema: mare.agent_contract.v1" in output
+    assert "May answer: no" in output
+    assert "Recommended action: compare_sources" in output
+    assert "Research status: needs_source_check" in output
+    assert "Research step 1: compare_sources | compare supporting evidence for connect the adapter besides manual.pdf" in output
 
 
 def test_run_chat_compare_command_handles_no_matches(monkeypatch, capsys) -> None:
@@ -470,9 +486,11 @@ def test_run_chat_shows_and_saves_evidence_rescue(monkeypatch, capsys, tmp_path:
     payload = json.loads(session_file.read_text())
 
     assert "Support: Strong support" in output
+    assert "Agent action: answer_with_citations" in output
     assert 'Evidence rescue: improved via "exact evidence for what onboarding items are required" (Strong support)' in output
     assert "The onboarding checklist requires completing payroll forms before system access." in output
     assert payload["entries"][0]["top_result"]["support"] == "Strong support"
+    assert payload["entries"][0]["top_result"]["agent_action"] == "answer_with_citations"
     assert payload["entries"][0]["top_result"]["evidence_rescue"] == "improved"
     assert "Evidence rescue: improved" in output
 
@@ -492,9 +510,11 @@ def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path:
     assert payload["entries"][0]["type"] == "ask"
     assert payload["entries"][0]["query"] == "how do I connect the AC adapter"
     assert payload["entries"][0]["top_result"]["citation"] == "manual.pdf | page 10"
+    assert payload["entries"][0]["top_result"]["agent_action"] == "compare_sources"
     assert "Session history: manual-session" in output
     assert "Recent entries" in output
     assert "[ask] how do I connect the AC adapter" in output
+    assert "Agent action: compare_sources" in output
 
 
 def test_run_chat_can_clear_session_history(monkeypatch, capsys, tmp_path: Path) -> None:

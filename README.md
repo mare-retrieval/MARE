@@ -83,6 +83,12 @@ Run an Evidence Brief over your own folder:
 mare workflow --folder ./docs --query "what does this document set require?" --task brief
 ```
 
+Ask for the compact agent action contract:
+
+```bash
+mare workflow --folder ./docs --query "what does this document set require?" --task contract
+```
+
 Choose a retrieval stack explicitly when you want to test an optional path:
 
 ```bash
@@ -130,6 +136,8 @@ MARE can return:
 - retrieval rationale and score
 - optional visual page retrieval for image-, chart-, table-, and layout-heavy PDFs through `mare-retrieval[colpali]`
 - Evidence Brief with source coverage, support strength, conflict hints, proof assets, gaps, and next questions
+- deterministic research plans that tell agents when to answer, retrieve stronger support, compare sources, or resolve conflicts
+- agent contracts with a recommended action, answer/stop signal, and stop reasons for tool-using agents
 - evidence rescue in `mare workflow` and `mare chat`: when initial support is weak or missing, MARE tries alternate evidence-seeking queries and records whether stronger proof was found
 - structured payloads for agents, tools, and applications
 
@@ -151,7 +159,7 @@ PDFs currently have the strongest visual proof because MARE can render pages and
 | `mare start` | guided onboarding | path-aware next commands |
 | `mare ask` | fastest single-document test | best page, snippet, citation, image paths |
 | `mare workflow` | terminal evaluation and agent-style output | corpus summary, object search, Evidence Brief, JSON payloads |
-| `mare chat` | simple local document-agent loop | `:brief`, `:review`, `:compare`, `:summary`, findings, session history |
+| `mare chat` | simple local document-agent loop | `:brief`, `:contract`, `:review`, `:compare`, `:summary`, findings, session history |
 | `mare ui` | visual exploration | uploads, Evidence Briefs, summaries, findings, highlights |
 | `mare mcp` | agent/app integrations | MCP tools returning structured evidence payloads |
 
@@ -194,6 +202,8 @@ from mare.integrations import hits_to_evidence_payload
 hits = app.retrieve("show me the onboarding steps", top_k=3)
 payload = hits_to_evidence_payload("show me the onboarding steps", hits)
 print(payload["evidence_brief"])
+print(payload["evidence_brief"]["research_plan"])
+print(payload["agent_contract"])
 ```
 
 ## Optional Integrations

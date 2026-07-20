@@ -8,9 +8,10 @@ from mare.streamlit_app import (
     _build_run_signature,
     _clear_ui_session_history,
     _load_ui_session_history,
-    _render_grounded_findings,
+    _render_agent_contract,
     _render_evidence_brief,
     _render_getting_started,
+    _render_grounded_findings,
     _render_review_snapshot,
     _resolve_retriever_choice,
     _result_matches_signature,
@@ -277,6 +278,10 @@ def test_render_evidence_brief_shows_trust_snapshot() -> None:
             "available_proof_assets": ["snippet", "citation"],
             "evidence_gaps": ["No obvious evidence gaps detected in the retrieved results."],
             "next_questions": ["Show the exact procedure evidence from manual.pdf."],
+            "research_plan": {
+                "status": "ready",
+                "steps": [{"action": "answer_with_citations", "query": "connect the adapter"}],
+            },
             "conflict_hints": [
                 {"message": "Retrieved evidence mixes requirement and optional language; compare the cited sources before acting."}
             ],
@@ -286,8 +291,42 @@ def test_render_evidence_brief_shows_trust_snapshot() -> None:
     assert ("subheader", "Evidence Brief") in calls
     assert any(call[0] == "markdown" and "Trust Snapshot" in call[1] for call in calls)
     assert any(call[0] == "markdown" and "Broad source coverage" in call[1] for call in calls)
+    assert any(call[0] == "markdown" and "Research plan" in call[1] for call in calls)
+    assert any(call[0] == "caption" and "answer_with_citations" in call[1] for call in calls)
     assert any(call[0] == "caption" and "requirement and optional" in call[1] for call in calls)
     assert any(call[0] == "caption" and "exact procedure" in call[1] for call in calls)
+
+
+def test_render_agent_contract_shows_action_signal() -> None:
+    calls = []
+
+    class _FakeStreamlit:
+        @staticmethod
+        def subheader(body):
+            calls.append(("subheader", body))
+
+        @staticmethod
+        def markdown(body, unsafe_allow_html=False):
+            calls.append(("markdown", body, unsafe_allow_html))
+
+        @staticmethod
+        def caption(body):
+            calls.append(("caption", body))
+
+    _render_agent_contract(
+        _FakeStreamlit(),
+        {
+            "recommended_action": "answer_with_citations",
+            "may_answer": True,
+            "support_status": "strong",
+            "source_coverage_status": "broad",
+            "stop_reasons": [],
+        },
+    )
+
+    assert ("subheader", "Agent Contract") in calls
+    assert any(call[0] == "markdown" and "answer_with_citations" in call[1] for call in calls)
+    assert any(call[0] == "markdown" and "May answer:</strong> yes" in call[1] for call in calls)
 
 
 def test_render_review_snapshot_shows_review_overview() -> None:

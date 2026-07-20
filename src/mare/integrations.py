@@ -204,6 +204,16 @@ def build_evidence_brief_payload(
     ]
     gaps = _evidence_gaps(results, resolved_support, unique_sources, conflict_hints=conflict_hints)
     next_questions = _next_evidence_questions(query=query, results=results, gaps=gaps, limit=limit)
+    research_plan = _build_research_plan(
+        query=query,
+        results=results,
+        support=resolved_support,
+        source_diversity=source_diversity,
+        gaps=gaps,
+        next_questions=next_questions,
+        conflict_hints=conflict_hints,
+        limit=limit,
+    )
 
     return {
         "overview": _evidence_brief_overview(results, resolved_support, unique_sources),
@@ -215,6 +225,7 @@ def build_evidence_brief_payload(
         "available_proof_assets": available_proof_assets,
         "evidence_gaps": gaps,
         "next_questions": next_questions,
+        "research_plan": research_plan,
     }
 
 
@@ -421,6 +432,125 @@ def _next_evidence_questions(
     return deduped
 
 
+def _build_research_plan(
+    *,
+    query: str,
+    results: list[dict[str, Any]],
+    support: dict[str, Any],
+    source_diversity: dict[str, Any],
+    gaps: list[str],
+    next_questions: list[str],
+    conflict_hints: list[dict[str, Any]],
+    limit: int,
+) -> dict[str, Any]:
+    """Build deterministic next retrieval moves for agentic document workflows."""
+    support_status = str(support.get("status") or "unknown")
+    source_status = str(source_diversity.get("status") or "unknown")
+    if not results:
+        status = "needs_evidence"
+        rationale = "No grounded evidence was retrieved, so the next step is source discovery."
+    elif support_status in {"weak", "none"}:
+        status = "needs_stronger_support"
+        rationale = "Initial support is weak, so alternate evidence-seeking queries should run before answering."
+    elif conflict_hints:
+        status = "needs_conflict_check"
+        rationale = "Potential conflict signals were found, so compare the cited evidence before acting."
+    elif source_status in {"single_source", "mixed"} and len(results) > 1:
+        status = "needs_source_check"
+        rationale = "Evidence is useful but source coverage is narrow, so compare related documents if available."
+    else:
+        status = "ready"
+        rationale = "Evidence is sufficient for a grounded answer, while preserving citations for inspection."
+
+    steps: list[dict[str, Any]] = []
+    base_query = " ".join(query.split()) or "this topic"
+    if status == "needs_evidence":
+        steps.append(
+            {
+                "action": "discover_sources",
+                "query": f"which document discusses {base_query}",
+                "reason": "Find candidate sources before making a claim.",
+            }
+        )
+        steps.append(
+            {
+                "action": "retrieve_exact_support",
+                "query": f"exact section or page supporting {base_query}",
+                "reason": "Move from broad source discovery to inspectable proof.",
+            }
+        )
+    else:
+        if support_status in {"weak", "none"}:
+            steps.append(
+                {
+                    "action": "retrieve_stronger_support",
+                    "query": f"exact evidence for {base_query}",
+                    "reason": "Weak support needs a narrower evidence query.",
+                }
+            )
+        if source_status in {"single_source", "mixed"}:
+            source = _source_label(results[0]) if results else ""
+            source_suffix = f" besides {source}" if source else ""
+            steps.append(
+                {
+                    "action": "compare_sources",
+                    "query": f"compare supporting evidence for {base_query}{source_suffix}",
+                    "reason": "Narrow source coverage should be checked against related documents.",
+                }
+            )
+        if conflict_hints:
+            steps.append(
+                {
+                    "action": "resolve_conflicts",
+                    "query": f"conflicting evidence about {base_query}",
+                    "reason": "Conflict signals require scoped comparison before acting.",
+                }
+            )
+        if not steps:
+            best = results[0] if results else {}
+            object_type = best.get("object_type") or "page"
+            source = _source_label(best) or "the top source"
+            steps.append(
+                {
+                    "action": "answer_with_citations",
+                    "query": base_query,
+                    "reason": f"Use the cited {object_type} evidence from {source}.",
+                }
+            )
+
+    for question in next_questions:
+        if len(steps) >= limit:
+            break
+        normalized = " ".join(str(question).split())
+        if not normalized:
+            continue
+        if any(step.get("query") == normalized for step in steps):
+            continue
+        steps.append(
+            {
+                "action": "follow_up",
+                "query": normalized,
+                "reason": "Evidence Brief follow-up question.",
+            }
+        )
+
+    if not steps:
+        steps.append(
+            {
+                "action": "inspect_evidence",
+                "query": base_query,
+                "reason": gaps[0] if gaps else "Inspect the retrieved citations before acting.",
+            }
+        )
+
+    return {
+        "status": status,
+        "rationale": rationale,
+        "step_count": len(steps[:limit]),
+        "steps": steps[:limit],
+    }
+
+
 def _evidence_brief_overview(results: list[dict[str, Any]], support: dict[str, Any], sources: list[str]) -> str:
     if not results:
         return "No evidence brief available because no grounded results were retrieved."
@@ -558,12 +688,55 @@ def build_grounded_review_payload(
     }
 
 
+def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, Any]:
+    """Build a compact action contract for agents using MARE evidence payloads."""
+    support = evidence_brief.get("support") or {}
+    source_diversity = evidence_brief.get("source_diversity") or {}
+    research_plan = evidence_brief.get("research_plan") or {}
+    support_status = str(support.get("status") or "unknown")
+    research_status = str(research_plan.get("status") or "unknown")
+    conflict_hints = evidence_brief.get("conflict_hints") or []
+    gaps = evidence_brief.get("evidence_gaps") or []
+
+    stop_reasons: list[str] = []
+    if support_status in {"weak", "none"}:
+        stop_reasons.append("support_not_sufficient")
+    if conflict_hints:
+        stop_reasons.append("conflict_hints_present")
+    if research_status in {"needs_evidence", "needs_stronger_support", "needs_conflict_check"}:
+        stop_reasons.append(research_status)
+
+    if research_status == "needs_evidence":
+        recommended_action = "discover_sources"
+    elif support_status in {"weak", "none"}:
+        recommended_action = "retrieve_stronger_support"
+    elif conflict_hints:
+        recommended_action = "resolve_conflicts"
+    elif research_status == "needs_source_check":
+        recommended_action = "compare_sources"
+    else:
+        recommended_action = "answer_with_citations"
+
+    return {
+        "schema_version": "mare.agent_contract.v1",
+        "support_status": support_status,
+        "source_coverage_status": source_diversity.get("status") or "unknown",
+        "research_status": research_status,
+        "recommended_action": recommended_action,
+        "may_answer": not stop_reasons and recommended_action == "answer_with_citations",
+        "stop_reasons": stop_reasons,
+        "research_plan": research_plan,
+        "evidence_gaps": gaps,
+    }
+
+
 def hits_to_evidence_payload(query: str, hits: list[RetrievalHit]) -> dict[str, Any]:
     results = [_serialize_hit(hit) for hit in hits]
     comparison = _build_comparison_payload(results)
     summary = build_grounded_summary_payload(results)
     findings = build_all_grounded_findings_payload(results)
     evidence_brief = build_evidence_brief_payload(query, results)
+    agent_contract = build_agent_contract_payload(evidence_brief)
     return {
         "query": query,
         "results": results,
@@ -571,6 +744,7 @@ def hits_to_evidence_payload(query: str, hits: list[RetrievalHit]) -> dict[str, 
         "summary": summary,
         "findings": findings,
         "evidence_brief": evidence_brief,
+        "agent_contract": agent_contract,
         "review": build_grounded_review_payload(
             results,
             comparison=comparison,

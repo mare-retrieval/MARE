@@ -169,6 +169,9 @@ def test_query_pdf_tool_returns_evidence_payload(monkeypatch) -> None:
     assert payload["proof_links"]["highlight_image_url"] == ""
     assert payload["comparison"][1]["citation"] == "guide.docx | page 12"
     assert payload["summary"]["overview"] == "Found 2 grounded results across 2 sources."
+    assert payload["evidence_brief"]["research_plan"]["status"] == "ready"
+    assert payload["agent_contract"]["schema_version"] == "mare.agent_contract.v1"
+    assert payload["agent_contract"]["recommended_action"] == "answer_with_citations"
 
 
 def test_query_document_tool_returns_evidence_payload(monkeypatch) -> None:
@@ -248,6 +251,7 @@ def test_query_corpus_tool_returns_evidence_payload(monkeypatch) -> None:
     assert payload["corpus_path"] == "generated/manual.json"
     assert payload["results"][0]["page"] == 10
     assert payload["comparison"][0]["source_document"] == "manual.pdf"
+    assert payload["agent_contract"]["may_answer"] is True
 
 
 def test_query_corpora_tool_returns_evidence_payload(monkeypatch) -> None:
