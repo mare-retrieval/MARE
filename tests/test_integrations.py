@@ -82,6 +82,8 @@ def test_hits_to_evidence_payload_preserves_result_fields() -> None:
     assert payload["query"] == "wake on lan"
     assert len(payload["results"]) == 2
     assert payload["results"][0]["doc_id"] == "doc-61"
+    assert payload["results"][0]["evidence_id"].startswith("mare-evidence-")
+    assert payload["results"][0]["provenance"]["evidence_id"] == payload["results"][0]["evidence_id"]
     assert payload["results"][0]["object_type"] == "procedure"
     assert payload["results"][0]["citation"] == "Manual | page 61 | Wake on LAN"
     assert payload["comparison"][0]["citation"] == "Manual | page 61 | Wake on LAN"
@@ -99,6 +101,77 @@ def test_hits_to_evidence_payload_preserves_result_fields() -> None:
     assert payload["agent_contract"]["may_answer"] is True
     assert payload["agent_contract"]["recommended_action"] == "answer_with_citations"
     assert payload["review"]["evidence_brief"]["overview"].startswith("Strong support")
+
+
+def test_hits_to_evidence_payload_includes_cell_level_table_provenance() -> None:
+    hit = RetrievalHit(
+        doc_id="statement-p4",
+        title="Income Statement",
+        page=4,
+        modality=Modality.TEXT,
+        score=0.93,
+        reason="Matched revenue table cell",
+        snippet="Revenue | 2025 | 1200000",
+        page_image_path="generated/statement/page-4.png",
+        highlight_image_path="generated/statement/crops/revenue-2025.png",
+        object_id="statement-p4:table:1",
+        object_type="table",
+        metadata={
+            "source": "statement.pdf",
+            "document_hash": "sha256:abc123",
+            "bbox": "[10, 20, 110, 40]",
+            "row": "Revenue",
+            "column": "2025",
+            "cell_ref": "B12",
+            "extraction_method": "paddleocr-table",
+            "confidence": "0.97",
+            "crop_path": "generated/statement/crops/revenue-2025.png",
+        },
+    )
+
+    payload = hits_to_evidence_payload("2025 revenue", [hit])
+    result = payload["results"][0]
+    provenance = result["provenance"]
+
+    assert result["evidence_id"].startswith("mare-evidence-")
+    assert provenance["document_hash"] == "sha256:abc123"
+    assert provenance["bounding_box"] == "[10,20,110,40]"
+    assert provenance["table_cell"] == {"row": "Revenue", "column": "2025", "cell": "B12"}
+    assert provenance["cell_level"] is True
+    assert provenance["extraction_method"] == "paddleocr-table"
+    assert provenance["ocr_confidence"] == "0.97"
+    assert provenance["rendered_crop_path"].endswith("revenue-2025.png")
+    assert payload["evidence_brief"]["top_provenance"]["evidence_id"] == result["evidence_id"]
+    assert any(
+        item["name"] == "table_cell_provenance" and item["status"] == "pass"
+        for item in payload["evidence_brief"]["evidence_quality"]["checks"]
+    )
+
+
+def test_build_evidence_brief_payload_warns_when_table_is_not_cell_level() -> None:
+    brief = build_evidence_brief_payload(
+        "2025 revenue",
+        [
+            {
+                "evidence_id": "mare-evidence-table",
+                "citation": "statement.pdf | page 4",
+                "title": "Statement",
+                "page": 4,
+                "score": 0.91,
+                "object_type": "table",
+                "snippet": "Revenue table",
+                "reason": "Matched table",
+                "metadata": {"source": "statement.pdf"},
+                "provenance": {"evidence_id": "mare-evidence-table", "cell_level": False},
+            }
+        ],
+    )
+
+    assert any("not cell-level" in gap for gap in brief["evidence_gaps"])
+    assert any(
+        item["name"] == "table_cell_provenance" and item["status"] == "warn"
+        for item in brief["evidence_quality"]["checks"]
+    )
 
 
 def test_build_grounded_summary_payload_handles_no_results() -> None:

@@ -133,12 +133,13 @@ MARE can return:
 - file, page, line, heading, or section-aware citation when available
 - rendered PDF page image when available
 - highlighted PDF proof image when localization is possible
+- stable evidence IDs and provenance payloads with document hash, page, object, bbox/table-cell coordinates when available, extraction method, confidence, and crop paths
 - retrieval rationale and score
 - optional visual page retrieval for image-, chart-, table-, and layout-heavy PDFs through `mare-retrieval[colpali]`
 - Evidence Brief with source coverage, support strength, conflict hints, proof assets, gaps, and next questions
 - deterministic research plans that tell agents when to answer, retrieve stronger support, compare sources, or resolve conflicts
 - agent contracts with a recommended action, answer/stop signal, and stop reasons for tool-using agents
-- evidence rescue in `mare workflow` and `mare chat`: when initial support is weak or missing, MARE tries alternate evidence-seeking queries and records whether stronger proof was found
+- evidence rescue in `mare workflow` and `mare chat`: when initial support is weak, missing, or missing core proof, MARE tries alternate evidence-seeking queries and records whether stronger proof was found
 - structured payloads for agents, tools, and applications
 
 ## Supported Documents
