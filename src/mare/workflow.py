@@ -13,6 +13,7 @@ from mare.integrations import (
     build_all_grounded_findings_payload,
     build_agent_contract_payload,
     build_evidence_brief_payload,
+    build_evidence_provenance,
     build_grounded_review_payload,
     build_grounded_summary_payload,
     format_evidence_citation,
@@ -298,7 +299,9 @@ def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: 
 
 
 def _serialize_hit(hit) -> dict[str, Any]:
+    provenance = build_evidence_provenance(hit)
     return {
+        "evidence_id": provenance["evidence_id"],
         "doc_id": hit.doc_id,
         "title": hit.title,
         "page": hit.page,
@@ -311,6 +314,7 @@ def _serialize_hit(hit) -> dict[str, Any]:
         "object_type": hit.object_type,
         "metadata": hit.metadata,
         "citation": format_evidence_citation(title=hit.title, page=hit.page, metadata=hit.metadata),
+        "provenance": provenance,
     }
 
 

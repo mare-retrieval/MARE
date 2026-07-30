@@ -435,7 +435,7 @@ def test_print_evidence_brief_shows_trust_view(capsys) -> None:
     assert "Strong support from 2 retrieved results across 2 sources." in output
     assert "Sources: manual.pdf, guide.docx" in output
     assert "Source coverage: Broad source coverage" in output
-    assert "Proof assets: snippet, citation, page_image, highlight" in output
+    assert "Proof assets: snippet, citation, provenance, page_image, highlight" in output
     assert "Agent action: answer_with_citations" in output
     assert "Research plan: ready" in output
     assert "Research step 1: answer_with_citations | connect the adapter" in output

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -79,9 +81,12 @@ def format_evidence_citation(
 
 
 def _hit_metadata(hit: RetrievalHit) -> dict[str, Any]:
+    provenance = build_evidence_provenance(hit)
     metadata = dict(hit.metadata)
     metadata.update(
         {
+            "evidence_id": provenance["evidence_id"],
+            "provenance": provenance,
             "doc_id": hit.doc_id,
             "title": hit.title,
             "page": hit.page,
@@ -102,8 +107,103 @@ def _hit_text(hit: RetrievalHit) -> str:
     return hit.snippet or hit.reason or hit.title
 
 
-def _serialize_hit(hit: RetrievalHit) -> dict[str, Any]:
+def _first_metadata_value(metadata: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = metadata.get(key)
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def _stable_json(value: Any) -> str:
+    if value in ("", None):
+        return ""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        try:
+            return json.dumps(json.loads(stripped), sort_keys=True, separators=(",", ":"))
+        except json.JSONDecodeError:
+            return stripped
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _source_hash(*, doc_id: str, title: str, metadata: dict[str, Any]) -> str:
+    explicit_hash = _first_metadata_value(metadata, "document_hash", "doc_hash", "source_hash", "sha256")
+    if explicit_hash:
+        return explicit_hash
+    source = _first_metadata_value(metadata, "source", "source_document", "path")
+    stable_source = source or f"{doc_id}:{title}"
+    return hashlib.sha256(stable_source.encode("utf-8")).hexdigest()
+
+
+def _table_cell_coordinates(metadata: dict[str, Any]) -> dict[str, str]:
     return {
+        key: value
+        for key, value in {
+            "row": _first_metadata_value(metadata, "row", "row_index", "table_row"),
+            "column": _first_metadata_value(metadata, "column", "col", "column_index", "table_column"),
+            "cell": _first_metadata_value(metadata, "cell", "cell_ref", "cell_reference"),
+        }.items()
+        if value
+    }
+
+
+def build_evidence_provenance(hit: RetrievalHit) -> dict[str, Any]:
+    metadata = dict(hit.metadata)
+    source = _first_metadata_value(metadata, "source", "source_document", "path")
+    document_hash = _source_hash(doc_id=hit.doc_id, title=hit.title, metadata=metadata)
+    bbox = _stable_json(_first_metadata_value(metadata, "bbox", "bounding_box", "region_bbox"))
+    table_cell = _table_cell_coordinates(metadata)
+    extraction_method = _first_metadata_value(
+        metadata,
+        "extraction_method",
+        "parser",
+        "ocr_engine",
+        "visual_retriever",
+    )
+    ocr_confidence = _first_metadata_value(metadata, "ocr_confidence", "confidence")
+    rendered_crop_path = _first_metadata_value(metadata, "crop_path", "rendered_crop_path", "evidence_crop_path")
+    if not rendered_crop_path:
+        rendered_crop_path = hit.highlight_image_path or hit.page_image_path
+
+    id_parts = [
+        document_hash,
+        str(hit.page),
+        hit.object_id or "",
+        hit.object_type or "",
+        bbox,
+        _stable_json(table_cell),
+        extraction_method,
+        ocr_confidence,
+    ]
+    evidence_id = "mare-evidence-" + hashlib.sha256("|".join(id_parts).encode("utf-8")).hexdigest()[:24]
+    return {
+        "evidence_id": evidence_id,
+        "document_hash": document_hash,
+        "source_document": source or hit.title,
+        "page": hit.page,
+        "object_id": hit.object_id,
+        "object_type": hit.object_type or "page",
+        "bounding_box": bbox,
+        "table_cell": table_cell,
+        "cell_level": bool(table_cell),
+        "extraction_method": extraction_method,
+        "ocr_confidence": ocr_confidence,
+        "page_image_path": hit.page_image_path,
+        "rendered_crop_path": rendered_crop_path,
+        "highlight_image_path": hit.highlight_image_path,
+    }
+
+
+def _serialize_hit(hit: RetrievalHit) -> dict[str, Any]:
+    provenance = build_evidence_provenance(hit)
+    return {
+        "evidence_id": provenance["evidence_id"],
         "doc_id": hit.doc_id,
         "title": hit.title,
         "page": hit.page,
@@ -116,6 +216,7 @@ def _serialize_hit(hit: RetrievalHit) -> dict[str, Any]:
         "object_type": hit.object_type,
         "metadata": dict(hit.metadata),
         "citation": format_evidence_citation(title=hit.title, page=hit.page, metadata=hit.metadata),
+        "provenance": provenance,
     }
 
 
@@ -203,6 +304,7 @@ def build_evidence_brief_payload(
         for name, value in (
             ("snippet", best.get("snippet")),
             ("citation", best.get("citation")),
+            ("provenance", best.get("evidence_id") or best.get("provenance")),
             ("page_image", best.get("page_image_path")),
             ("highlight", best.get("highlight_image_path")),
         )
@@ -228,6 +330,7 @@ def build_evidence_brief_payload(
         "source_documents": unique_sources,
         "source_diversity": source_diversity,
         "evidence_quality": evidence_quality,
+        "top_provenance": best.get("provenance") or {},
         "conflict_hints": conflict_hints,
         "available_proof_assets": available_proof_assets,
         "evidence_gaps": gaps,
@@ -404,6 +507,32 @@ def _evidence_quality_payload(
             else "Top evidence has no highlighted visual proof.",
         }
     )
+    provenance = best.get("provenance") or {}
+    evidence_id = best.get("evidence_id") or provenance.get("evidence_id")
+    checks.append(
+        {
+            "name": "stable_provenance",
+            "status": "pass" if evidence_id else "warn",
+            "message": "Top evidence includes a stable provenance ID."
+            if evidence_id
+            else "Top evidence is missing a stable provenance ID.",
+            "value": evidence_id or "",
+        }
+    )
+    is_table = str(best.get("object_type") or "").lower() == "table"
+    has_cell = bool((provenance.get("table_cell") or {})) or bool(provenance.get("cell_level"))
+    checks.append(
+        {
+            "name": "table_cell_provenance",
+            "status": "pass" if not is_table or has_cell else "warn",
+            "message": "Top table evidence includes cell-level coordinates."
+            if is_table and has_cell
+            else "Top table evidence is page/table-level, not cell-level."
+            if is_table
+            else "Top evidence is not table evidence.",
+            "value": has_cell,
+        }
+    )
     checks.append(
         {
             "name": "source_coverage",
@@ -527,6 +656,11 @@ def _evidence_gaps(
         gaps.append("No highlighted visual proof is available for the top result.")
     if not best.get("snippet"):
         gaps.append("No exact snippet is available for the top result.")
+    provenance = best.get("provenance") or {}
+    if (best.get("object_type") or "").lower() == "table" and not (
+        provenance.get("cell_level") or provenance.get("table_cell")
+    ):
+        gaps.append("Top table evidence is not cell-level; verify table-cell coordinates before mapping into a spreadsheet.")
 
     if not gaps:
         gaps.append("No obvious evidence gaps detected in the retrieved results.")

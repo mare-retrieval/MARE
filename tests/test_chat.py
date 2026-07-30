@@ -467,7 +467,7 @@ def test_run_chat_supports_brief_command(monkeypatch, capsys) -> None:
     assert "Strong support from 2 retrieved results across 1 source." in output
     assert "Sources: manual.pdf" in output
     assert "Source coverage: Single-source coverage" in output
-    assert "Proof assets: snippet, citation, page_image, highlight" in output
+    assert "Proof assets: snippet, citation, provenance, page_image, highlight" in output
     assert "Next question 1:" in output
 
 
