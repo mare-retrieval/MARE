@@ -77,6 +77,9 @@ class WorkflowHistoryStore:
         query_step = payload["steps"]["query_corpus"]
         results = query_step["results"]
         best = results[0] if results else None
+        evidence_brief = query_step.get("evidence_brief") or {}
+        evidence_quality = evidence_brief.get("evidence_quality") or {}
+        evidence_rescue = query_step.get("evidence_rescue") or {}
         self.payload["runs"].append(
             {
                 "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
@@ -87,6 +90,11 @@ class WorkflowHistoryStore:
                 "intent": query_step["plan"]["intent"],
                 "result_count": len(results),
                 "agent_action": (query_step.get("agent_contract") or {}).get("recommended_action") or "",
+                "evidence_quality": {
+                    "status": evidence_quality.get("status") or "",
+                    "label": evidence_quality.get("label") or "",
+                },
+                "evidence_rescue": _evidence_rescue_history_status(evidence_rescue),
                 "top_result": (
                     {
                         "citation": best.get("citation") or "",
@@ -101,6 +109,14 @@ class WorkflowHistoryStore:
             }
         )
         self.save()
+
+
+def _evidence_rescue_history_status(evidence_rescue: dict[str, Any]) -> str:
+    if evidence_rescue.get("improved"):
+        return "improved"
+    if evidence_rescue.get("attempted"):
+        return "attempted"
+    return ""
 
 
 def _matches_patterns(path: Path, folder: Path, patterns: list[str]) -> bool:
@@ -222,6 +238,37 @@ def _support_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> bo
     return candidate_score > baseline_score
 
 
+def _quality_rank(evidence_quality: dict[str, Any]) -> int:
+    return {"poor": 0, "limited": 1, "usable": 2, "high": 3}.get(str(evidence_quality.get("status") or ""), 0)
+
+
+def _rescue_improved(
+    *,
+    candidate_support: dict[str, Any],
+    baseline_support: dict[str, Any],
+    candidate_quality: dict[str, Any],
+    baseline_quality: dict[str, Any],
+) -> bool:
+    if _support_improved(candidate_support, baseline_support):
+        return True
+
+    candidate_support_rank = _support_rank(candidate_support)
+    baseline_support_rank = _support_rank(baseline_support)
+    candidate_quality_rank = _quality_rank(candidate_quality)
+    baseline_quality_rank = _quality_rank(baseline_quality)
+    if candidate_quality_rank > baseline_quality_rank and candidate_support_rank >= baseline_support_rank:
+        return True
+
+    if candidate_support_rank != baseline_support_rank or candidate_quality_rank != baseline_quality_rank:
+        return False
+
+    candidate_score = candidate_support.get("best_score")
+    baseline_score = baseline_support.get("best_score")
+    if not isinstance(candidate_score, (int, float)) or not isinstance(baseline_score, (int, float)):
+        return False
+    return candidate_score > baseline_score
+
+
 def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: int = 2) -> list[str]:
     base_query = " ".join(query.split())
     candidates = [
@@ -275,33 +322,46 @@ def _build_evidence_rescue(
     baseline_support: dict[str, Any],
     top_k: int,
 ) -> dict[str, Any]:
-    if baseline_support.get("status") not in {"weak", "none"}:
+    baseline_quality = evidence_brief.get("evidence_quality") or {}
+    support_needs_rescue = baseline_support.get("status") in {"weak", "none"}
+    quality_needs_rescue = baseline_quality.get("status") == "poor"
+    if not support_needs_rescue and not quality_needs_rescue:
         return {
             "attempted": False,
             "improved": False,
-            "reason": "Evidence rescue only runs when initial support is weak or missing.",
+            "reason": "Evidence rescue only runs when initial support is weak, missing, or missing core proof.",
             "queries": [],
             "attempts": [],
             "best_query": "",
             "support": baseline_support,
+            "evidence_quality": baseline_quality,
             "results": [],
         }
 
     queries = _build_rescue_queries(query, evidence_brief)
     best_query = ""
     best_support = baseline_support
+    best_quality = baseline_quality
     best_results: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
     for rescue_query in queries:
         explanation = app.explain(rescue_query, top_k=top_k)
         support = _build_support_assessment(explanation)
         results = [_serialize_hit(hit) for hit in explanation.fused_results]
-        improved = _support_improved(support, best_support)
+        candidate_brief = build_evidence_brief_payload(query, results, support=support)
+        evidence_quality = candidate_brief.get("evidence_quality") or {}
+        improved = _rescue_improved(
+            candidate_support=support,
+            baseline_support=best_support,
+            candidate_quality=evidence_quality,
+            baseline_quality=best_quality,
+        )
         best = results[0] if results else {}
         attempts.append(
             {
                 "query": rescue_query,
                 "support": support,
+                "evidence_quality": evidence_quality,
                 "result_count": len(results),
                 "top_citation": best.get("citation") or "",
                 "top_score": best.get("score"),
@@ -312,16 +372,22 @@ def _build_evidence_rescue(
             continue
         best_query = rescue_query
         best_support = support
+        best_quality = evidence_quality
         best_results = results
+
+    reason = "Initial support was weak, so MARE tried alternate evidence-seeking queries."
+    if quality_needs_rescue and not support_needs_rescue:
+        reason = "Initial evidence was missing core proof, so MARE tried alternate evidence-seeking queries."
 
     return {
         "attempted": True,
         "improved": bool(best_query),
-        "reason": "Initial support was weak, so MARE tried alternate evidence-seeking queries.",
+        "reason": reason,
         "queries": queries,
         "attempts": attempts,
         "best_query": best_query,
         "support": best_support,
+        "evidence_quality": best_quality,
         "results": best_results,
     }
 
@@ -553,6 +619,9 @@ def _print_pretty(payload: dict[str, Any]) -> None:
         print(f"Support note: {support['message']}")
     if evidence_brief.get("overview"):
         print(f"Evidence brief: {evidence_brief['overview']}")
+    evidence_quality = evidence_brief.get("evidence_quality") or {}
+    if evidence_quality.get("label"):
+        print(f"Evidence quality: {evidence_quality['label']}")
     agent_contract = query_step.get("agent_contract") or {}
     if agent_contract.get("recommended_action"):
         print(f"Agent action: {agent_contract['recommended_action']}")
@@ -667,6 +736,11 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     source_diversity = evidence_brief.get("source_diversity") or {}
     if source_diversity.get("label"):
         print(f"Source coverage: {source_diversity['label']}")
+    evidence_quality = evidence_brief.get("evidence_quality") or {}
+    if evidence_quality.get("label"):
+        print(f"Evidence quality: {evidence_quality['label']}")
+    for item in evidence_quality.get("checks") or []:
+        print(f"Quality check {item.get('name')}: {item.get('status')} - {item.get('message')}")
     proof_assets = evidence_brief.get("available_proof_assets") or []
     print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
     agent_contract = query_step.get("agent_contract") or {}
@@ -701,6 +775,7 @@ def _print_agent_contract(payload: dict[str, Any]) -> None:
     print(f"May answer: {'yes' if contract.get('may_answer') else 'no'}")
     print(f"Recommended action: {contract.get('recommended_action') or '[unknown]'}")
     print(f"Support: {contract.get('support_status') or '[unknown]'}")
+    print(f"Evidence quality: {contract.get('evidence_quality_status') or '[unknown]'}")
     print(f"Source coverage: {contract.get('source_coverage_status') or '[unknown]'}")
     print(f"Research status: {contract.get('research_status') or '[unknown]'}")
     stop_reasons = contract.get("stop_reasons") or []

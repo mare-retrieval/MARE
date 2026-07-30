@@ -543,6 +543,7 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
 
     support = evidence_brief.get("support") or {}
     source_diversity = evidence_brief.get("source_diversity") or {}
+    evidence_quality = evidence_brief.get("evidence_quality") or {}
     sources = evidence_brief.get("source_documents") or []
     proof_assets = evidence_brief.get("available_proof_assets") or []
     research_plan = evidence_brief.get("research_plan") or {}
@@ -553,6 +554,7 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
           <div class="mare-value">{evidence_brief.get('overview') or 'No evidence brief available.'}</div>
           <p class="mare-mini" style="margin-top:0.55rem;"><strong>Support:</strong> {support.get('label') or '[unknown]'}</p>
           <p class="mare-mini"><strong>Source coverage:</strong> {source_diversity.get('label') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Evidence quality:</strong> {evidence_quality.get('label') or '[unknown]'}</p>
           <p class="mare-mini"><strong>Sources:</strong> {', '.join(sources) if sources else '[none]'}</p>
           <p class="mare-mini"><strong>Proof assets:</strong> {', '.join(proof_assets) if proof_assets else '[none]'}</p>
           <p class="mare-mini"><strong>Research plan:</strong> {research_plan.get('status') or '[none]'}</p>
@@ -570,6 +572,10 @@ def _render_evidence_brief(st, evidence_brief: dict) -> None:
         st.markdown("**Next questions**")
         for item in evidence_brief.get("next_questions") or []:
             st.caption(item)
+    if evidence_quality.get("checks"):
+        st.markdown("**Quality checks**")
+        for item in evidence_quality.get("checks") or []:
+            st.caption(f"{item.get('name')}: {item.get('status')} - {item.get('message')}")
     conflict_hints = evidence_brief.get("conflict_hints") or []
     if conflict_hints:
         st.markdown("**Conflict hints**")
@@ -598,6 +604,7 @@ def _render_agent_contract(st, agent_contract: dict) -> None:
           <div class="mare-value">{agent_contract.get('recommended_action') or '[unknown]'}</div>
           <p class="mare-mini" style="margin-top:0.55rem;"><strong>May answer:</strong> {may_answer}</p>
           <p class="mare-mini"><strong>Support:</strong> {agent_contract.get('support_status') or '[unknown]'}</p>
+          <p class="mare-mini"><strong>Evidence quality:</strong> {agent_contract.get('evidence_quality_status') or '[unknown]'}</p>
           <p class="mare-mini"><strong>Source coverage:</strong> {agent_contract.get('source_coverage_status') or '[unknown]'}</p>
           <p class="mare-mini"><strong>Stop reasons:</strong> {', '.join(stop_reasons) if stop_reasons else '[none]'}</p>
         </div>

@@ -192,6 +192,12 @@ def build_evidence_brief_payload(
     unique_sources = _unique_source_labels(results)
     source_diversity = _source_diversity_payload(results, unique_sources)
     conflict_hints = _conflict_hints(results)
+    evidence_quality = _evidence_quality_payload(
+        results=results,
+        support=resolved_support,
+        source_diversity=source_diversity,
+        conflict_hints=conflict_hints,
+    )
     available_proof_assets = [
         name
         for name, value in (
@@ -221,6 +227,7 @@ def build_evidence_brief_payload(
         "source_count": len(unique_sources),
         "source_documents": unique_sources,
         "source_diversity": source_diversity,
+        "evidence_quality": evidence_quality,
         "conflict_hints": conflict_hints,
         "available_proof_assets": available_proof_assets,
         "evidence_gaps": gaps,
@@ -323,6 +330,134 @@ def _source_diversity_payload(results: list[dict[str, Any]], sources: list[str])
         "source_count": source_count,
         "result_count": result_count,
         "ratio": round(ratio, 4),
+    }
+
+
+def _evidence_quality_payload(
+    *,
+    results: list[dict[str, Any]],
+    support: dict[str, Any],
+    source_diversity: dict[str, Any],
+    conflict_hints: list[dict[str, Any]],
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+
+    if not results:
+        checks.append(
+            {
+                "name": "retrieval",
+                "status": "fail",
+                "message": "No grounded evidence was retrieved.",
+            }
+        )
+        return {
+            "status": "poor",
+            "label": "Poor evidence quality",
+            "message": "No retrieved evidence is available to inspect.",
+            "passed_checks": 0,
+            "check_count": len(checks),
+            "checks": checks,
+        }
+
+    best = results[0]
+    support_status = str(support.get("status") or "unknown")
+    source_status = str(source_diversity.get("status") or "unknown")
+    best_score = support.get("best_score")
+    score = float(best_score) if isinstance(best_score, (int, float)) else None
+
+    checks.append(
+        {
+            "name": "top_score",
+            "status": "pass" if support_status in {"strong", "moderate"} else "warn",
+            "message": (
+                f"Top evidence score is {score:.2f}."
+                if score is not None
+                else "Top evidence score is unavailable."
+            ),
+            "value": score,
+        }
+    )
+    checks.append(
+        {
+            "name": "exact_snippet",
+            "status": "pass" if best.get("snippet") else "fail",
+            "message": "Top evidence includes an exact snippet."
+            if best.get("snippet")
+            else "Top evidence is missing an exact snippet.",
+        }
+    )
+    checks.append(
+        {
+            "name": "citation",
+            "status": "pass" if best.get("citation") else "fail",
+            "message": "Top evidence includes an inspectable citation."
+            if best.get("citation")
+            else "Top evidence is missing an inspectable citation.",
+        }
+    )
+    checks.append(
+        {
+            "name": "visual_proof",
+            "status": "pass" if best.get("highlight_image_path") else "warn",
+            "message": "Top evidence includes highlighted visual proof."
+            if best.get("highlight_image_path")
+            else "Top evidence has no highlighted visual proof.",
+        }
+    )
+    checks.append(
+        {
+            "name": "source_coverage",
+            "status": "pass" if source_status == "broad" else "warn",
+            "message": source_diversity.get("message") or "Source coverage could not be determined.",
+            "value": source_diversity.get("source_count"),
+        }
+    )
+    checks.append(
+        {
+            "name": "conflict_signals",
+            "status": "warn" if conflict_hints else "pass",
+            "message": "Potential conflict signals were detected."
+            if conflict_hints
+            else "No obvious conflict signals detected.",
+            "value": len(conflict_hints),
+        }
+    )
+
+    passed = sum(1 for check in checks if check["status"] == "pass")
+    failed = sum(1 for check in checks if check["status"] == "fail")
+    warned = sum(1 for check in checks if check["status"] == "warn")
+
+    if failed:
+        status = "poor"
+        label = "Poor evidence quality"
+    elif support_status == "strong" and passed >= 4 and not conflict_hints:
+        status = "high"
+        label = "High evidence quality"
+    elif support_status in {"strong", "moderate"} and warned <= 3:
+        status = "usable"
+        label = "Usable evidence quality"
+    else:
+        status = "limited"
+        label = "Limited evidence quality"
+
+    if status == "high":
+        message = "The top evidence has strong support and enough proof signals to answer with citations."
+    elif status == "usable":
+        message = "The evidence is usable, but at least one proof or coverage signal should be inspected."
+    elif status == "limited":
+        message = "The evidence has useful pieces, but support or coverage is not strong enough to trust blindly."
+    else:
+        message = "The evidence is missing core proof needed for a trustworthy answer."
+
+    return {
+        "status": status,
+        "label": label,
+        "message": message,
+        "passed_checks": passed,
+        "warning_checks": warned,
+        "failed_checks": failed,
+        "check_count": len(checks),
+        "checks": checks,
     }
 
 
@@ -692,8 +827,10 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
     """Build a compact action contract for agents using MARE evidence payloads."""
     support = evidence_brief.get("support") or {}
     source_diversity = evidence_brief.get("source_diversity") or {}
+    evidence_quality = evidence_brief.get("evidence_quality") or {}
     research_plan = evidence_brief.get("research_plan") or {}
     support_status = str(support.get("status") or "unknown")
+    evidence_quality_status = str(evidence_quality.get("status") or "unknown")
     research_status = str(research_plan.get("status") or "unknown")
     conflict_hints = evidence_brief.get("conflict_hints") or []
     gaps = evidence_brief.get("evidence_gaps") or []
@@ -701,6 +838,8 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
     stop_reasons: list[str] = []
     if support_status in {"weak", "none"}:
         stop_reasons.append("support_not_sufficient")
+    if evidence_quality_status == "poor":
+        stop_reasons.append("evidence_quality_poor")
     if conflict_hints:
         stop_reasons.append("conflict_hints_present")
     if research_status in {"needs_evidence", "needs_stronger_support", "needs_conflict_check"}:
@@ -710,6 +849,8 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
         recommended_action = "discover_sources"
     elif support_status in {"weak", "none"}:
         recommended_action = "retrieve_stronger_support"
+    elif evidence_quality_status == "poor":
+        recommended_action = "inspect_evidence"
     elif conflict_hints:
         recommended_action = "resolve_conflicts"
     elif research_status == "needs_source_check":
@@ -720,6 +861,7 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
     return {
         "schema_version": "mare.agent_contract.v1",
         "support_status": support_status,
+        "evidence_quality_status": evidence_quality_status,
         "source_coverage_status": source_diversity.get("status") or "unknown",
         "research_status": research_status,
         "recommended_action": recommended_action,

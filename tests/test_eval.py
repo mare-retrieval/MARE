@@ -96,6 +96,10 @@ def test_evaluate_cases_reports_hits_and_no_result_accuracy() -> None:
     assert summary.object_hits >= 1
     assert len(results) == 3
     assert results[2].no_result_correct is True
+    assert results[0].support_status in {"strong", "moderate", "weak"}
+    assert results[0].evidence_quality_status in {"high", "usable", "limited", "poor"}
+    assert summary.answerable_cases == 2
+    assert summary.usable_quality_rate >= 0.0
 
 
 def test_evaluate_corpus_runs_end_to_end(tmp_path: Path) -> None:
@@ -195,6 +199,7 @@ def test_compare_stacks_returns_reports_for_multiple_modes(tmp_path: Path, monke
 
     assert set(reports) == {"builtin", "fastembed", "hybrid-semantic"}
     assert reports["builtin"][0].total_cases == 4
+    assert reports["builtin"][0].answerable_cases == 4
     assert reports["fastembed"][0].total_cases == 4
     assert reports["hybrid-semantic"][0].total_cases == 4
 
@@ -215,5 +220,7 @@ def test_format_comparison_output_recommends_best_stack() -> None:
 
     assert output["recommendation"]["best_stack"] == "fastembed"
     assert output["recommendation"]["ranking"][0]["stack"] == "fastembed"
+    assert "usable_quality_rate" in output["recommendation"]["ranking"][0]
     assert output["recommendation"]["ranking"][0]["score"] > output["recommendation"]["ranking"][1]["score"]
+    assert "evidence-quality" in output["recommendation"]["reason"]
     assert "comparison" in output

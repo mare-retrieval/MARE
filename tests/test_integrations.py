@@ -91,6 +91,8 @@ def test_hits_to_evidence_payload_preserves_result_fields() -> None:
     assert payload["evidence_brief"]["support"]["status"] == "strong"
     assert payload["evidence_brief"]["source_count"] == 2
     assert payload["evidence_brief"]["source_diversity"]["status"] == "broad"
+    assert payload["evidence_brief"]["evidence_quality"]["status"] == "high"
+    assert payload["evidence_brief"]["evidence_quality"]["passed_checks"] >= 4
     assert payload["evidence_brief"]["research_plan"]["status"] == "ready"
     assert payload["evidence_brief"]["research_plan"]["steps"][0]["action"] == "answer_with_citations"
     assert payload["agent_contract"]["schema_version"] == "mare.agent_contract.v1"
@@ -130,6 +132,11 @@ def test_build_evidence_brief_payload_flags_gaps_and_next_questions() -> None:
     assert brief["source_diversity"]["status"] == "single_source"
     assert "snippet" in brief["available_proof_assets"]
     assert any("highlighted visual proof" in gap for gap in brief["evidence_gaps"])
+    assert brief["evidence_quality"]["status"] == "limited"
+    assert any(
+        item["name"] == "visual_proof" and item["status"] == "warn"
+        for item in brief["evidence_quality"]["checks"]
+    )
     assert brief["next_questions"]
     assert brief["research_plan"]["status"] == "needs_stronger_support"
     assert brief["research_plan"]["steps"][0]["action"] == "retrieve_stronger_support"
@@ -163,6 +170,10 @@ def test_build_evidence_brief_payload_detects_conflict_hints() -> None:
 
     assert brief["source_diversity"]["status"] == "broad"
     assert brief["conflict_hints"][0]["type"] == "requirement_vs_optional"
+    assert any(
+        item["name"] == "conflict_signals" and item["status"] == "warn"
+        for item in brief["evidence_quality"]["checks"]
+    )
     assert brief["research_plan"]["status"] == "needs_conflict_check"
     assert brief["research_plan"]["steps"][0]["action"] == "resolve_conflicts"
     assert "Potentially conflicting evidence signals" in brief["evidence_gaps"][0] or any(
@@ -175,6 +186,8 @@ def test_build_evidence_brief_payload_builds_source_discovery_plan_for_no_result
     contract = build_agent_contract_payload(brief)
 
     assert brief["research_plan"]["status"] == "needs_evidence"
+    assert brief["evidence_quality"]["status"] == "poor"
+    assert brief["evidence_quality"]["checks"][0]["name"] == "retrieval"
     assert brief["research_plan"]["step_count"] == 3
     assert brief["research_plan"]["steps"][0]["action"] == "discover_sources"
     assert brief["research_plan"]["steps"][1]["action"] == "retrieve_exact_support"
@@ -236,6 +249,33 @@ def test_build_agent_contract_payload_blocks_weak_or_conflicting_evidence() -> N
     assert conflict_contract["may_answer"] is False
     assert conflict_contract["recommended_action"] == "resolve_conflicts"
     assert "conflict_hints_present" in conflict_contract["stop_reasons"]
+
+
+def test_build_agent_contract_payload_blocks_poor_evidence_quality() -> None:
+    brief = build_evidence_brief_payload(
+        "what does the policy require",
+        [
+            {
+                "citation": "policy.pdf | page 2",
+                "title": "Policy",
+                "page": 2,
+                "score": 0.9,
+                "object_type": "section",
+                "snippet": "",
+                "reason": "Matched policy wording",
+                "metadata": {"source": "policy.pdf"},
+            }
+        ],
+    )
+
+    contract = build_agent_contract_payload(brief)
+
+    assert brief["support"]["status"] == "strong"
+    assert brief["evidence_quality"]["status"] == "poor"
+    assert contract["may_answer"] is False
+    assert contract["recommended_action"] == "inspect_evidence"
+    assert contract["evidence_quality_status"] == "poor"
+    assert "evidence_quality_poor" in contract["stop_reasons"]
 
 
 def test_build_grounded_findings_payload_extracts_actions_and_requirements() -> None:

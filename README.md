@@ -120,7 +120,7 @@ Compare retrieval stacks before choosing one:
 mare-eval --corpus generated/manual.json --eval examples/eval_cases.json --stack builtin --stack fastembed --stack hybrid-semantic
 ```
 
-The comparison output includes a recommendation block with the best stack and ranked page/doc/object/no-result metrics.
+The comparison output includes a recommendation block with the best stack and ranked page/doc/object, evidence-quality, and no-result metrics.
 If you install `mare-retrieval[colpali]`, you can also compare `--stack colpali-visual` on corpora with rendered PDF page images.
 If the corpus has no rendered page images, MARE will explain that the visual retriever needs PDF page images and suggest a text retriever instead.
 

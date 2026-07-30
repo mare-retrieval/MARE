@@ -74,6 +74,8 @@ class ChatSessionStore:
             best = results[0] if results else None
             if best:
                 support = query_step.get("support") or {}
+                evidence_brief = query_step.get("evidence_brief") or {}
+                evidence_quality = (evidence_brief.get("evidence_quality") or {})
                 evidence_rescue = query_step.get("evidence_rescue") or {}
                 agent_contract = query_step.get("agent_contract") or {}
                 summary = {
@@ -87,6 +89,8 @@ class ChatSessionStore:
                     "page": best.get("page"),
                     "snippet": best.get("snippet") or "",
                     "support": support.get("label") or "",
+                    "evidence_quality": evidence_quality.get("label") or "",
+                    "evidence_quality_status": evidence_quality.get("status") or "",
                     "evidence_rescue": _evidence_rescue_history_status(evidence_rescue),
                     "agent_action": agent_contract.get("recommended_action") or "",
                 }
@@ -258,6 +262,8 @@ def _print_history(session_store: ChatSessionStore) -> None:
             print(f"   Snippet: {top_result['snippet']}")
         if top_result.get("support"):
             print(f"   Support: {top_result['support']}")
+        if top_result.get("evidence_quality"):
+            print(f"   Evidence quality: {top_result['evidence_quality']}")
         if top_result.get("agent_action"):
             print(f"   Agent action: {top_result['agent_action']}")
         if top_result.get("evidence_rescue"):
@@ -430,6 +436,11 @@ def _print_evidence_brief(payload: dict) -> None:
     source_diversity = evidence_brief.get("source_diversity") or {}
     if source_diversity.get("label"):
         print(f"Source coverage: {source_diversity['label']}")
+    evidence_quality = evidence_brief.get("evidence_quality") or {}
+    if evidence_quality.get("label"):
+        print(f"Evidence quality: {evidence_quality['label']}")
+    for item in evidence_quality.get("checks") or []:
+        print(f"Quality check {item.get('name')}: {item.get('status')} - {item.get('message')}")
     proof_assets = evidence_brief.get("available_proof_assets") or []
     print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
     agent_contract = query_step.get("agent_contract") or {}
@@ -464,6 +475,7 @@ def _print_agent_contract(payload: dict) -> None:
     print(f"May answer: {'yes' if contract.get('may_answer') else 'no'}")
     print(f"Recommended action: {contract.get('recommended_action') or '[unknown]'}")
     print(f"Support: {contract.get('support_status') or '[unknown]'}")
+    print(f"Evidence quality: {contract.get('evidence_quality_status') or '[unknown]'}")
     print(f"Source coverage: {contract.get('source_coverage_status') or '[unknown]'}")
     print(f"Research status: {contract.get('research_status') or '[unknown]'}")
     stop_reasons = contract.get("stop_reasons") or []
