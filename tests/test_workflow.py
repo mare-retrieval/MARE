@@ -133,6 +133,42 @@ class _WeakThenRescuedApp(_FakeApp):
         )
 
 
+class _PoorQualityThenRescuedApp(_FakeApp):
+    def explain(self, query: str, top_k: int = 3):
+        rescued = query.startswith("exact evidence for")
+        snippet = "The policy requires manager approval before access is granted." if rescued else ""
+        highlight = "generated/policy/highlight-2.png" if rescued else ""
+        reason = "Matched exact approval requirement." if rescued else "Matched policy wording."
+
+        return RetrievalExplanation(
+            plan=QueryPlan(
+                query=query,
+                selected_modalities=[Modality.TEXT],
+                discarded_modalities=[Modality.IMAGE, Modality.LAYOUT],
+                confidence=0.8,
+                intent="semantic_lookup",
+                rationale="test",
+            ),
+            per_modality_results={},
+            fused_results=[
+                RetrievalHit(
+                    doc_id="doc-1",
+                    title="Policy",
+                    page=2,
+                    modality=Modality.TEXT,
+                    score=0.91,
+                    reason=reason,
+                    snippet=snippet,
+                    page_image_path="generated/policy/page-2.png",
+                    highlight_image_path=highlight,
+                    object_id="doc-1:section:1",
+                    object_type="section",
+                    metadata={"source": "policy.pdf"},
+                )
+            ],
+        )
+
+
 class _BrokenRetrieverApp(_FakeApp):
     def explain(self, query: str, top_k: int = 3):
         raise RuntimeError("ColPali visual retrieval needs rendered PDF page images in the corpus.")
@@ -286,6 +322,30 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     assert query_step["agent_contract"]["recommended_action"] == "answer_with_citations"
 
 
+def test_build_workflow_payload_rescues_poor_quality_evidence() -> None:
+    payload = _build_workflow_payload(
+        _PoorQualityThenRescuedApp(),
+        query="what approval is required",
+        object_query="approval required",
+        object_type="section",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+    )
+    query_step = payload["steps"]["query_corpus"]
+
+    assert query_step["support"]["status"] == "strong"
+    assert query_step["retrieval_query"] == "exact evidence for what approval is required"
+    assert query_step["results"][0]["snippet"] == "The policy requires manager approval before access is granted."
+    assert query_step["evidence_brief"]["evidence_quality"]["status"] == "high"
+    assert query_step["evidence_rescue"]["attempted"] is True
+    assert query_step["evidence_rescue"]["improved"] is True
+    assert query_step["evidence_rescue"]["reason"].startswith("Initial evidence was missing core proof")
+    assert query_step["evidence_rescue"]["attempts"][0]["evidence_quality"]["status"] == "high"
+    assert query_step["agent_contract"]["may_answer"] is True
+    assert query_step["agent_contract"]["recommended_action"] == "answer_with_citations"
+
+
 def test_print_pretty_shows_human_friendly_summary(capsys) -> None:
     payload = _build_workflow_payload(
         _FakeApp(),
@@ -425,6 +485,8 @@ def test_workflow_history_store_persists_runs(tmp_path: Path) -> None:
     assert len(saved["runs"]) == 1
     assert saved["runs"][0]["query"] == "connect the adapter"
     assert saved["runs"][0]["agent_action"] == "answer_with_citations"
+    assert saved["runs"][0]["evidence_quality"]["status"] == "high"
+    assert saved["runs"][0]["evidence_rescue"] == ""
     assert saved["runs"][0]["top_result"]["citation"] == "manual.pdf | page 10"
     assert saved["runs"][0]["top_result"]["object_type"] == "procedure"
 

@@ -490,8 +490,11 @@ def test_run_chat_shows_and_saves_evidence_rescue(monkeypatch, capsys, tmp_path:
     assert 'Evidence rescue: improved via "exact evidence for what onboarding items are required" (Strong support)' in output
     assert "The onboarding checklist requires completing payroll forms before system access." in output
     assert payload["entries"][0]["top_result"]["support"] == "Strong support"
+    assert payload["entries"][0]["top_result"]["evidence_quality"] == "High evidence quality"
+    assert payload["entries"][0]["top_result"]["evidence_quality_status"] == "high"
     assert payload["entries"][0]["top_result"]["agent_action"] == "answer_with_citations"
     assert payload["entries"][0]["top_result"]["evidence_rescue"] == "improved"
+    assert "Evidence quality: High evidence quality" in output
     assert "Evidence rescue: improved" in output
 
 
@@ -510,10 +513,12 @@ def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path:
     assert payload["entries"][0]["type"] == "ask"
     assert payload["entries"][0]["query"] == "how do I connect the AC adapter"
     assert payload["entries"][0]["top_result"]["citation"] == "manual.pdf | page 10"
+    assert payload["entries"][0]["top_result"]["evidence_quality"] == "High evidence quality"
     assert payload["entries"][0]["top_result"]["agent_action"] == "compare_sources"
     assert "Session history: manual-session" in output
     assert "Recent entries" in output
     assert "[ask] how do I connect the AC adapter" in output
+    assert "Evidence quality: High evidence quality" in output
     assert "Agent action: compare_sources" in output
 
 

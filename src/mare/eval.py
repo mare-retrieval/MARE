@@ -11,6 +11,7 @@ from mare.extensions import (
     SUPPORTED_RETRIEVER_STACKS,
     config_for_retriever_stack,
 )
+from mare.integrations import hits_to_evidence_payload
 
 
 @dataclass
@@ -27,6 +28,7 @@ class EvalCase:
 class EvalCaseResult:
     query: str
     top_k: int
+    expect_no_result: bool
     returned_doc_id: str | None
     returned_page: int | None
     returned_object_type: str | None
@@ -35,6 +37,9 @@ class EvalCaseResult:
     doc_hit: bool
     object_hit: bool
     no_result_correct: bool
+    support_status: str = "unknown"
+    evidence_quality_status: str = "unknown"
+    proof_asset_count: int = 0
 
 
 @dataclass
@@ -44,6 +49,9 @@ class EvalSummary:
     doc_hits: int
     object_hits: int
     no_result_correct: int
+    answerable_cases: int = 0
+    high_quality: int = 0
+    usable_or_high_quality: int = 0
 
     @property
     def page_hit_rate(self) -> float:
@@ -60,6 +68,14 @@ class EvalSummary:
     @property
     def no_result_accuracy(self) -> float:
         return round(self.no_result_correct / self.total_cases, 4) if self.total_cases else 0.0
+
+    @property
+    def high_quality_rate(self) -> float:
+        return round(self.high_quality / self.answerable_cases, 4) if self.answerable_cases else 0.0
+
+    @property
+    def usable_quality_rate(self) -> float:
+        return round(self.usable_or_high_quality / self.answerable_cases, 4) if self.answerable_cases else 0.0
 
 
 SUPPORTED_STACKS = tuple(stack for stack in SUPPORTED_RETRIEVER_STACKS if stack != "smart")
@@ -81,11 +97,19 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
     results: list[EvalCaseResult] = []
 
     for case in cases:
-        hit = app.best_match(case.query, top_k=case.top_k)
+        hits = app.retrieve(case.query, top_k=case.top_k)
+        hit = hits[0] if hits else None
+        evidence_payload = hits_to_evidence_payload(case.query, hits)
+        evidence_brief = evidence_payload.get("evidence_brief") or {}
+        support = evidence_brief.get("support") or {}
+        evidence_quality = evidence_brief.get("evidence_quality") or {}
         returned_doc_id = hit.doc_id if hit else None
         returned_page = hit.page if hit else None
         returned_object_type = hit.object_type if hit and hit.object_type else None
         returned_score = hit.score if hit else None
+        support_status = str(support.get("status") or "unknown")
+        evidence_quality_status = str(evidence_quality.get("status") or "unknown")
+        proof_asset_count = len(evidence_brief.get("available_proof_assets") or [])
 
         no_result_correct = case.expect_no_result and hit is None
         doc_hit = case.expected_doc_id is not None and returned_doc_id == case.expected_doc_id
@@ -101,6 +125,7 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
             EvalCaseResult(
                 query=case.query,
                 top_k=case.top_k,
+                expect_no_result=case.expect_no_result,
                 returned_doc_id=returned_doc_id,
                 returned_page=returned_page,
                 returned_object_type=returned_object_type,
@@ -109,15 +134,24 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
                 doc_hit=doc_hit,
                 object_hit=object_hit,
                 no_result_correct=no_result_correct,
+                support_status=support_status,
+                evidence_quality_status=evidence_quality_status,
+                proof_asset_count=proof_asset_count,
             )
         )
 
+    answerable_results = [item for item in results if not item.expect_no_result]
     summary = EvalSummary(
         total_cases=len(results),
         page_hits=sum(1 for item in results if item.page_hit),
         doc_hits=sum(1 for item in results if item.doc_hit),
         object_hits=sum(1 for item in results if item.object_hit),
         no_result_correct=sum(1 for item in results if item.no_result_correct),
+        answerable_cases=len(answerable_results),
+        high_quality=sum(1 for item in answerable_results if item.evidence_quality_status == "high"),
+        usable_or_high_quality=sum(
+            1 for item in answerable_results if item.evidence_quality_status in {"high", "usable"}
+        ),
     )
     return summary, results
 
@@ -151,6 +185,8 @@ def _format_output(summary: EvalSummary, results: list[EvalCaseResult]) -> dict:
             "doc_hit_rate": summary.doc_hit_rate,
             "object_hit_rate": summary.object_hit_rate,
             "no_result_accuracy": summary.no_result_accuracy,
+            "high_quality_rate": summary.high_quality_rate,
+            "usable_quality_rate": summary.usable_quality_rate,
         },
         "results": [asdict(result) for result in results],
     }
@@ -163,6 +199,8 @@ def _summary_metrics(summary: EvalSummary) -> dict[str, int | float]:
         "doc_hit_rate": summary.doc_hit_rate,
         "object_hit_rate": summary.object_hit_rate,
         "no_result_accuracy": summary.no_result_accuracy,
+        "high_quality_rate": summary.high_quality_rate,
+        "usable_quality_rate": summary.usable_quality_rate,
     }
 
 
@@ -177,10 +215,12 @@ def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCa
     ranking = []
     for stack, (summary, _) in reports.items():
         score = round(
-            (0.4 * summary.page_hit_rate)
-            + (0.3 * summary.doc_hit_rate)
-            + (0.2 * summary.object_hit_rate)
-            + (0.1 * summary.no_result_accuracy),
+            (0.3 * summary.page_hit_rate)
+            + (0.25 * summary.doc_hit_rate)
+            + (0.15 * summary.object_hit_rate)
+            + (0.15 * summary.usable_quality_rate)
+            + (0.1 * summary.high_quality_rate)
+            + (0.05 * summary.no_result_accuracy),
             4,
         )
         ranking.append(
@@ -197,6 +237,8 @@ def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCa
             item["page_hit_rate"],
             item["doc_hit_rate"],
             item["object_hit_rate"],
+            item["usable_quality_rate"],
+            item["high_quality_rate"],
             item["no_result_accuracy"],
         ),
         reverse=True,
@@ -206,7 +248,7 @@ def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCa
         "best_stack": best["stack"],
         "reason": (
             f"{best['stack']} had the strongest weighted evidence score "
-            f"({best['score']}) across page, document, object, and no-result checks."
+            f"({best['score']}) across page, document, object, evidence-quality, and no-result checks."
         ),
         "ranking": ranking,
     }
@@ -223,6 +265,8 @@ def _format_comparison_output(reports: dict[str, tuple[EvalSummary, list[EvalCas
                     "doc_hit_rate": summary.doc_hit_rate,
                     "object_hit_rate": summary.object_hit_rate,
                     "no_result_accuracy": summary.no_result_accuracy,
+                    "high_quality_rate": summary.high_quality_rate,
+                    "usable_quality_rate": summary.usable_quality_rate,
                 },
                 "results": [asdict(result) for result in results],
             }
