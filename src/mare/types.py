@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class Modality(str, Enum):
@@ -16,6 +17,53 @@ class ObjectType(str, Enum):
     FIGURE = "figure"
     TABLE = "table"
     SECTION = "section"
+
+
+@dataclass(frozen=True)
+class RetrievalFilters:
+    document_ids: tuple[str, ...] = ()
+    sources: tuple[str, ...] = ()
+    pages: tuple[int, ...] = ()
+    object_types: tuple[str, ...] = ()
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, value: dict | None) -> "RetrievalFilters | None":
+        if not value:
+            return None
+        return cls(
+            document_ids=tuple(str(item) for item in value.get("document_ids", [])),
+            sources=tuple(str(item) for item in value.get("sources", [])),
+            pages=tuple(int(item) for item in value.get("pages", [])),
+            object_types=tuple(str(item) for item in value.get("object_types", [])),
+            metadata={str(key): str(item) for key, item in value.get("metadata", {}).items()},
+        )
+
+    def matches(self, hit: "RetrievalHit") -> bool:
+        if self.document_ids and hit.doc_id not in self.document_ids:
+            return False
+        if self.pages and hit.page not in self.pages:
+            return False
+        if self.object_types and (hit.object_type or "page").lower() not in {item.lower() for item in self.object_types}:
+            return False
+        if self.sources:
+            source = str(hit.metadata.get("source") or hit.title)
+            allowed = {item.casefold() for item in self.sources}
+            if source.casefold() not in allowed and Path(source).name.casefold() not in allowed:
+                return False
+        for key, value in self.metadata.items():
+            if str(hit.metadata.get(key, "")).casefold() != str(value).casefold():
+                return False
+        return True
+
+    def as_dict(self) -> dict:
+        return {
+            "document_ids": list(self.document_ids),
+            "sources": list(self.sources),
+            "pages": list(self.pages),
+            "object_types": list(self.object_types),
+            "metadata": dict(self.metadata),
+        }
 
 
 @dataclass

@@ -1,5 +1,5 @@
 from mare.engine import MAREngine
-from mare.types import Document, DocumentObject, Modality, ObjectType
+from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalFilters
 
 
 def _docs() -> list[Document]:
@@ -44,6 +44,50 @@ def test_text_query_defaults_to_semantic_lookup() -> None:
     assert explanation.plan.intent == "semantic_lookup"
     assert explanation.fused_results[0].doc_id == "1"
     assert "positional encoding" in explanation.fused_results[0].snippet.lower()
+
+
+def test_retrieval_filters_limit_documents_pages_and_metadata() -> None:
+    docs = _docs()
+    docs[0].metadata.update({"source": "/docs/transformer.pdf", "version": "draft"})
+    docs[1].metadata.update({"source": "/docs/benchmark.pdf", "version": "final"})
+    engine = MAREngine(docs)
+
+    hits = engine.retrieve(
+        "retrieval benchmark positional encoding",
+        top_k=3,
+        filters=RetrievalFilters(sources=("benchmark.pdf",), pages=(2,), metadata={"version": "final"}),
+    )
+
+    assert hits
+    assert {hit.doc_id for hit in hits} == {"2"}
+
+
+def test_retrieval_filters_support_object_types() -> None:
+    docs = [
+        Document(
+            doc_id="1",
+            title="Guide",
+            page=3,
+            text="The setup procedure connects the adapter.",
+            objects=[
+                DocumentObject(
+                    object_id="1:procedure:1",
+                    doc_id="1",
+                    page=3,
+                    object_type=ObjectType.PROCEDURE,
+                    content="Connect the adapter.",
+                )
+            ],
+        )
+    ]
+
+    hits = MAREngine(docs).retrieve(
+        "connect adapter procedure",
+        filters=RetrievalFilters(object_types=("procedure",)),
+    )
+
+    assert hits
+    assert all(hit.object_type == "procedure" for hit in hits)
 
 
 def test_procedure_queries_get_structure_boost_reason() -> None:

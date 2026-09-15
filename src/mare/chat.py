@@ -9,7 +9,8 @@ from pathlib import Path
 from mare.api import MAREApp
 from mare.extensions import MAREConfig, SUPPORTED_RETRIEVER_STACKS, config_for_retriever_stack
 from mare.integrations import format_evidence_citation
-from mare.workflow import _build_workflow_payload, _load_app, _print_rescue_summary
+from mare.types import RetrievalFilters
+from mare.workflow import _build_workflow_payload, _load_app, _parse_metadata_filters, _print_rescue_summary
 
 
 _SKIP_DIR_NAMES = {
@@ -799,6 +800,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=3, help="How many retrieval hits to consider")
     parser.add_argument("--page-limit", type=int, default=3, help="How many pages to include in summaries")
     parser.add_argument("--object-limit", type=int, default=5, help="How many objects to include in summaries")
+    parser.add_argument("--filter-doc-id", action="append", default=[], help="Only retrieve from this document ID. Repeatable.")
+    parser.add_argument("--filter-source", action="append", default=[], help="Only retrieve from this source path or filename. Repeatable.")
+    parser.add_argument("--filter-page", action="append", type=int, default=[], help="Only retrieve from this page. Repeatable.")
+    parser.add_argument("--filter-object-type", action="append", choices=("page", "procedure", "figure", "table", "section"), default=[], help="Only retrieve this evidence type. Repeatable.")
+    parser.add_argument("--filter-metadata", action="append", default=[], metavar="KEY=VALUE", help="Require an exact metadata value. Repeatable.")
     parser.add_argument("--session-file", help="Optional JSON file path for saving chat session history")
     parser.add_argument("--session-name", help="Optional session name used for saved chat history")
     parser.add_argument("--no-history", action="store_true", help="Disable saved chat session history")
@@ -818,6 +824,18 @@ def main() -> None:
         parser=args.parser,
         config=config_for_retriever_stack(args.retriever),
     )
+    try:
+        metadata_filters = _parse_metadata_filters(args.filter_metadata)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if args.filter_doc_id or args.filter_source or args.filter_page or args.filter_object_type or metadata_filters:
+        app.default_filters = RetrievalFilters(
+            document_ids=tuple(args.filter_doc_id),
+            sources=tuple(args.filter_source),
+            pages=tuple(args.filter_page),
+            object_types=tuple(args.filter_object_type),
+            metadata=metadata_filters,
+        )
     session_store = None
     if not args.no_history:
         session_store = build_session_store(app, session_file=args.session_file, session_name=args.session_name)

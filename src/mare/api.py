@@ -8,7 +8,7 @@ from typing import Any
 from mare.demo import load_documents
 from mare.engine import MAREngine
 from mare.extensions import DocumentParser, MAREConfig, get_parser, resolve_runtime_config
-from mare.types import Document, DocumentObject, RetrievalExplanation, RetrievalHit
+from mare.types import Document, DocumentObject, RetrievalExplanation, RetrievalFilters, RetrievalHit
 
 
 @dataclass
@@ -21,6 +21,7 @@ class MAREApp:
     source_pdf: Path | None = None
     source_pdfs: list[Path] = field(default_factory=list)
     config: MAREConfig = field(default_factory=MAREConfig)
+    default_filters: RetrievalFilters | None = None
     engine: MAREngine = field(init=False)
 
     def __post_init__(self) -> None:
@@ -125,14 +126,16 @@ class MAREApp:
             config=config,
         )
 
-    def explain(self, query: str, top_k: int = 3) -> RetrievalExplanation:
-        return self.engine.explain(query, top_k=top_k)
+    def explain(self, query: str, top_k: int = 3, filters: RetrievalFilters | None = None) -> RetrievalExplanation:
+        return self.engine.explain(query, top_k=top_k, filters=filters or self.default_filters)
 
-    def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalHit]:
-        return self.engine.retrieve(query, top_k=top_k)
+    def retrieve(self, query: str, top_k: int = 3, filters: RetrievalFilters | None = None) -> list[RetrievalHit]:
+        return self.engine.retrieve(query, top_k=top_k, filters=filters or self.default_filters)
 
-    def best_match(self, query: str, top_k: int = 3) -> RetrievalHit | None:
-        results = self.retrieve(query=query, top_k=top_k)
+    def best_match(
+        self, query: str, top_k: int = 3, filters: RetrievalFilters | None = None
+    ) -> RetrievalHit | None:
+        results = self.retrieve(query=query, top_k=top_k, filters=filters)
         return results[0] if results else None
 
     def get_document(self, doc_id: str) -> Document | None:
