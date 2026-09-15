@@ -1,5 +1,7 @@
 # MARE 0.4.7
 
+> Superseded by [MARE 0.4.8](https://github.com/mare-retrieval/MARE/releases/tag/v0.4.8). Use 0.4.8 or newer. The follow-up release includes everything in 0.4.7 plus remote MCP hardening, CI, and expanded evaluation.
+
 MARE 0.4.7 is the Evidence Quality and Provenance release.
 
 This release makes MARE's agent-facing evidence easier to evaluate, reference, and audit. Evidence Briefs now expose explicit quality checks, and retrieved evidence carries stable identifiers and provenance metadata that survive structured workflow and agent handoffs.
