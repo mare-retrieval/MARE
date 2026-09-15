@@ -340,9 +340,10 @@ Key areas that changed meaningfully in this chat:
 
 ## Release position
 
-- PyPI and GitHub releases are current through `v0.4.6`, the Agentic Evidence Planning release.
-- `main` contains two post-release capability commits: evidence-quality signals and stable evidence provenance IDs.
-- Those post-release changes are the current basis for a future `v0.4.7`; they are not part of the published `v0.4.6` artifacts.
+- PyPI and GitHub releases are current through `v0.4.8`, the Remote MCP Hardening and Evaluation release.
+- `v0.4.7` remains in immutable package history but is explicitly marked as superseded by `v0.4.8`.
+- Post-`v0.4.8` work on `main` includes parallel evidence rescue and cross-surface retrieval filters.
+- Do not publish another version per feature or per commit. Bundle related post-0.4.8 work into one meaningful milestone and follow `PUBLISHING.md`.
 
 ## How the product should be described now
 

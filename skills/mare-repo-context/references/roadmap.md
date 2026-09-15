@@ -165,7 +165,8 @@ Current status:
 - the first release-worthy grounded extraction slice is now present across chat, workflow, UI, and shared payloads
 - Evidence Briefs are now present across chat, workflow, UI, and shared evidence payloads
 - research plans and agent contracts are shipped in v0.4.6
-- evidence-quality checks and stable provenance IDs are implemented on `main` after v0.4.6 and should anchor the next release
+- evidence-quality checks, stable provenance IDs, remote MCP hardening, CI, and expanded evaluation are published through v0.4.8
+- parallel evidence rescue and cross-surface retrieval filters are on `main` after v0.4.8 and should remain unreleased until grouped into a coherent milestone
 - the next iteration should improve the quality and specificity of those extracted findings rather than re-adding the same categories
 
 ## High-impact later

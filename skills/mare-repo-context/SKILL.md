@@ -211,8 +211,10 @@ Current release train has recently included:
 - `v0.4.4`
 - `v0.4.5` as the Evidence Brief release
 - `v0.4.6` as the Agentic Evidence Planning release
+- `v0.4.7` as the Evidence Quality and Provenance release, immediately superseded by `v0.4.8`
+- `v0.4.8` as the current Remote MCP Hardening and Evaluation release
 
-Post-`v0.4.6` work already on `main` includes evidence-quality signals and stable evidence provenance IDs. Treat those changes as the basis for the next release rather than describing them as part of the published `v0.4.6` package.
+Post-`v0.4.8` work on `main` includes parallel evidence rescue and cross-surface retrieval filters. Keep accumulating related work on `main`; do not create another public version until there is one coherent, approved milestone.
 
 Check the current version directly from `pyproject.toml` instead of assuming.
 
