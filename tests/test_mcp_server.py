@@ -302,6 +302,28 @@ def test_query_corpus_tool_returns_evidence_payload(monkeypatch) -> None:
     assert payload["agent_contract"]["may_answer"] is True
 
 
+def test_query_corpus_tool_passes_structured_filters(monkeypatch) -> None:
+    captured = {}
+    app = _FakeApp()
+
+    def retrieve(query: str, top_k: int = 3, filters=None):
+        captured["filters"] = filters
+        return _FakeApp.retrieve(app, query, top_k)
+
+    app.retrieve = retrieve
+    monkeypatch.setattr("mare.mcp_server.load_corpus", lambda **kwargs: app)
+
+    query_corpus_tool(
+        "generated/manual.json",
+        "connect the adapter",
+        filters={"document_ids": ["doc-1"], "pages": [10], "metadata": {"status": "final"}},
+    )
+
+    assert captured["filters"].document_ids == ("doc-1",)
+    assert captured["filters"].pages == (10,)
+    assert captured["filters"].metadata == {"status": "final"}
+
+
 def test_query_corpora_tool_returns_evidence_payload(monkeypatch) -> None:
     monkeypatch.setattr("mare.mcp_server.load_corpora", lambda **kwargs: _FakeApp())
 

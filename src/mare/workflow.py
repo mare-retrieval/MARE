@@ -20,6 +20,19 @@ from mare.integrations import (
     build_grounded_summary_payload,
     format_evidence_citation,
 )
+from mare.types import RetrievalFilters
+
+
+def _parse_metadata_filters(values: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(f"Invalid metadata filter '{value}'. Expected KEY=VALUE.")
+        key, expected = value.split("=", 1)
+        if not key.strip():
+            raise ValueError("Metadata filter keys must not be empty.")
+        parsed[key.strip()] = expected.strip()
+    return parsed
 
 
 _SKIP_DIR_NAMES = {
@@ -512,8 +525,10 @@ def _build_workflow_payload(
         evidence_brief=evidence_brief,
     )
 
+    active_filters = getattr(app, "default_filters", None)
     return {
         "workflow": "agent-evidence",
+        "filters": active_filters.as_dict() if active_filters else {},
         "source": {
             "corpus": str(app.corpus_path) if app.corpus_path else "",
             "corpora": [str(path) for path in app.corpus_paths],
@@ -899,6 +914,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=3, help="How many final retrieval hits to return")
     parser.add_argument("--page-limit", type=int, default=3, help="How many pages to show in the corpus summary")
     parser.add_argument("--object-limit", type=int, default=5, help="How many objects to show in summary/search")
+    parser.add_argument("--filter-doc-id", action="append", default=[], help="Only retrieve from this document ID. Repeatable.")
+    parser.add_argument("--filter-source", action="append", default=[], help="Only retrieve from this source path or filename. Repeatable.")
+    parser.add_argument("--filter-page", action="append", type=int, default=[], help="Only retrieve from this page number. Repeatable.")
+    parser.add_argument("--filter-object-type", action="append", choices=("page", "procedure", "figure", "table", "section"), default=[], help="Only retrieve this evidence type. Repeatable.")
+    parser.add_argument("--filter-metadata", action="append", default=[], metavar="KEY=VALUE", help="Require an exact metadata value. Repeatable.")
     parser.add_argument(
         "--rescue-query-limit",
         type=int,
@@ -960,6 +980,18 @@ def main() -> None:
         parser=args.parser,
         config=config_for_retriever_stack(args.retriever),
     )
+    try:
+        metadata_filters = _parse_metadata_filters(args.filter_metadata)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if args.filter_doc_id or args.filter_source or args.filter_page or args.filter_object_type or metadata_filters:
+        app.default_filters = RetrievalFilters(
+            document_ids=tuple(args.filter_doc_id),
+            sources=tuple(args.filter_source),
+            pages=tuple(args.filter_page),
+            object_types=tuple(args.filter_object_type),
+            metadata=metadata_filters,
+        )
     try:
         payload = _build_workflow_payload(
             app,

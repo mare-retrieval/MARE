@@ -13,12 +13,29 @@ from typing import Any
 
 from mare.api import load_corpora, load_corpus, load_document, load_pdf
 from mare.integrations import hits_to_evidence_payload
+from mare.types import RetrievalFilters
 
 _PUBLIC_BASE_URL = ""
 _MEDIA_PATH = "/media"
 _RESTRICT_LOCAL_PATHS = False
 _DOWNLOAD_TIMEOUT_SECONDS = 20
 _MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _coerce_retrieval_filters(value: dict[str, Any] | None) -> RetrievalFilters | None:
+    return RetrievalFilters.from_dict(value)
+
+
+def _retrieve_with_filters(app, query: str, top_k: int, filters: dict[str, Any] | None):
+    resolved = _coerce_retrieval_filters(filters)
+    if resolved is None:
+        return app.retrieve(query=query, top_k=top_k)
+    return app.retrieve(query=query, top_k=top_k, filters=resolved)
+
+
+def _serialized_filters(value: dict[str, Any] | None) -> dict[str, Any]:
+    resolved = _coerce_retrieval_filters(value)
+    return resolved.as_dict() if resolved else {}
 
 
 def _safe_download_dir() -> Path:
@@ -213,13 +230,15 @@ def query_pdf_tool(
     reuse: bool = False,
     parser: str = "builtin",
     top_k: int = 3,
+    filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _require_allowed_local_path(pdf_path)
     if output_path:
         _require_allowed_local_path(output_path)
     app = load_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
-    hits = app.retrieve(query=query, top_k=top_k)
+    hits = _retrieve_with_filters(app, query, top_k, filters)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    payload["filters"] = _serialized_filters(filters)
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -238,13 +257,15 @@ def query_document_tool(
     reuse: bool = False,
     parser: str = "builtin",
     top_k: int = 3,
+    filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _require_allowed_local_path(document_path)
     if output_path:
         _require_allowed_local_path(output_path)
     app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
-    hits = app.retrieve(query=query, top_k=top_k)
+    hits = _retrieve_with_filters(app, query, top_k, filters)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    payload["filters"] = _serialized_filters(filters)
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -282,6 +303,7 @@ def query_pdf_url_tool(
     reuse: bool = False,
     parser: str = "builtin",
     top_k: int = 3,
+    filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     local_pdf = _download_pdf_url(pdf_url=pdf_url, download_path=download_path)
     payload = query_pdf_tool(
@@ -291,27 +313,30 @@ def query_pdf_url_tool(
         reuse=reuse,
         parser=parser,
         top_k=top_k,
+        filters=filters,
     )
     payload.update({"pdf_url": pdf_url, "download_path": str(local_pdf)})
     return payload
 
 
-def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3) -> dict[str, Any]:
+def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
     _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
-    hits = app.retrieve(query=query, top_k=top_k)
+    hits = _retrieve_with_filters(app, query, top_k, filters)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    payload["filters"] = _serialized_filters(filters)
     _attach_remote_asset_urls(payload)
     payload.update({"corpus_path": str(corpus_path)})
     return payload
 
 
-def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3) -> dict[str, Any]:
+def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
     for corpus_path in corpus_paths:
         _require_allowed_local_path(corpus_path)
     app = load_corpora(corpus_paths=corpus_paths)
-    hits = app.retrieve(query=query, top_k=top_k)
+    hits = _retrieve_with_filters(app, query, top_k, filters)
     payload = hits_to_evidence_payload(query=query, hits=hits)
+    payload["filters"] = _serialized_filters(filters)
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -419,6 +444,7 @@ def create_mcp_server():
         reuse: bool = False,
         parser: str = "builtin",
         top_k: int = 3,
+        filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Query a PDF directly and return grounded evidence with page, snippet, highlight, and metadata."""
 
@@ -429,6 +455,7 @@ def create_mcp_server():
             reuse=reuse,
             parser=parser,
             top_k=top_k,
+            filters=filters,
         )
 
     @server.tool()
@@ -439,6 +466,7 @@ def create_mcp_server():
         reuse: bool = False,
         parser: str = "builtin",
         top_k: int = 3,
+        filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Query a source document directly and return grounded evidence with snippet, proof metadata, and assets when available."""
 
@@ -449,6 +477,7 @@ def create_mcp_server():
             reuse=reuse,
             parser=parser,
             top_k=top_k,
+            filters=filters,
         )
 
     @server.tool()
@@ -478,6 +507,7 @@ def create_mcp_server():
         reuse: bool = False,
         parser: str = "builtin",
         top_k: int = 3,
+        filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Download a PDF from an HTTP(S) URL, then return grounded evidence with page, snippet, highlight, and metadata."""
 
@@ -489,19 +519,20 @@ def create_mcp_server():
             reuse=reuse,
             parser=parser,
             top_k=top_k,
+            filters=filters,
         )
 
     @server.tool()
-    def query_corpus(corpus_path: str, query: str, top_k: int = 3) -> dict[str, Any]:
+    def query_corpus(corpus_path: str, query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         """Query an existing MARE corpus JSON and return grounded evidence results."""
 
-        return query_corpus_tool(corpus_path=corpus_path, query=query, top_k=top_k)
+        return query_corpus_tool(corpus_path=corpus_path, query=query, top_k=top_k, filters=filters)
 
     @server.tool()
-    def query_corpora(corpus_paths: list[str], query: str, top_k: int = 3) -> dict[str, Any]:
+    def query_corpora(corpus_paths: list[str], query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         """Query multiple MARE corpora together and return the best grounded evidence across PDFs."""
 
-        return query_corpora_tool(corpus_paths=corpus_paths, query=query, top_k=top_k)
+        return query_corpora_tool(corpus_paths=corpus_paths, query=query, top_k=top_k, filters=filters)
 
     @server.tool()
     def page_objects(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:

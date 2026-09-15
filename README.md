@@ -83,6 +83,15 @@ Run an Evidence Brief over your own folder:
 mare workflow --folder ./docs --query "what does this document set require?" --task brief
 ```
 
+Narrow retrieval to trusted sources, pages, evidence types, or metadata:
+
+```bash
+mare workflow --folder ./docs --query "what changed?" --filter-source policy-v2.pdf --filter-page 4
+mare chat --folder ./docs --filter-object-type table --filter-metadata status=final
+```
+
+The Python API and MCP query tools accept the same filter model through `RetrievalFilters` or a structured `filters` object.
+
 Ask for the compact agent action contract:
 
 ```bash

@@ -44,7 +44,7 @@ from .integrations import (
     hit_to_llamaindex_node,
 )
 from .router import HeuristicModalityRouter
-from .types import Document, Modality, QueryPlan, RetrievalExplanation, RetrievalHit
+from .types import Document, Modality, QueryPlan, RetrievalExplanation, RetrievalFilters, RetrievalHit
 
 
 def create_mcp_server():
@@ -163,6 +163,7 @@ __all__ = [
     "QdrantHybridRetriever",
     "register_parser",
     "RetrievalExplanation",
+    "RetrievalFilters",
     "RetrievalHit",
     "search_objects_tool",
     "SentenceTransformersRetriever",
