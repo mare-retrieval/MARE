@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import fnmatch
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -271,6 +273,8 @@ def _rescue_improved(
 
 
 def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: int = 2) -> list[str]:
+    if limit <= 0:
+        return []
     base_query = " ".join(query.split())
     candidates = [
         f"exact evidence for {base_query}",
@@ -325,6 +329,7 @@ def _build_evidence_rescue(
     evidence_brief: dict[str, Any],
     baseline_support: dict[str, Any],
     top_k: int,
+    query_limit: int = 2,
 ) -> dict[str, Any]:
     baseline_quality = evidence_brief.get("evidence_quality") or {}
     support_needs_rescue = baseline_support.get("status") in {"weak", "none"}
@@ -342,14 +347,31 @@ def _build_evidence_rescue(
             "results": [],
         }
 
-    queries = _build_rescue_queries(query, evidence_brief)
+    queries = _build_rescue_queries(query, evidence_brief, limit=max(0, query_limit))
+    if not queries:
+        return {
+            "attempted": False,
+            "improved": False,
+            "reason": "Evidence rescue is disabled because the rescue query limit is zero.",
+            "strategy": "parallel_multi_query",
+            "query_limit": query_limit,
+            "elapsed_ms": 0.0,
+            "queries": [],
+            "attempts": [],
+            "best_query": "",
+            "support": baseline_support,
+            "evidence_quality": baseline_quality,
+            "results": [],
+        }
     best_query = ""
     best_support = baseline_support
     best_quality = baseline_quality
     best_results: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
-    for rescue_query in queries:
-        explanation = app.explain(rescue_query, top_k=top_k)
+    started_at = time.perf_counter()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(queries))) as executor:
+        explanations = list(executor.map(lambda item: app.explain(item, top_k=top_k), queries))
+    for rescue_query, explanation in zip(queries, explanations):
         support = _build_support_assessment(explanation)
         results = [_serialize_hit(hit) for hit in explanation.fused_results]
         candidate_brief = build_evidence_brief_payload(query, results, support=support)
@@ -385,6 +407,9 @@ def _build_evidence_rescue(
 
     return {
         "attempted": True,
+        "strategy": "parallel_multi_query",
+        "query_limit": query_limit,
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 3),
         "improved": bool(best_query),
         "reason": reason,
         "queries": queries,
@@ -452,6 +477,7 @@ def _build_workflow_payload(
     top_k: int,
     page_limit: int,
     object_limit: int,
+    rescue_query_limit: int = 2,
 ) -> dict[str, Any]:
     summary = app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
     browsed_objects = app.search_objects(query=object_query, object_type=object_type, limit=object_limit)
@@ -465,6 +491,7 @@ def _build_workflow_payload(
         evidence_brief=evidence_brief,
         baseline_support=support,
         top_k=top_k,
+        query_limit=rescue_query_limit,
     )
     retrieval_query = query
     if evidence_rescue.get("improved"):
@@ -872,6 +899,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=3, help="How many final retrieval hits to return")
     parser.add_argument("--page-limit", type=int, default=3, help="How many pages to show in the corpus summary")
     parser.add_argument("--object-limit", type=int, default=5, help="How many objects to show in summary/search")
+    parser.add_argument(
+        "--rescue-query-limit",
+        type=int,
+        choices=range(0, 9),
+        default=2,
+        metavar="0-8",
+        help="Maximum alternate queries to run in parallel when evidence is weak. Use 0 to disable rescue.",
+    )
     parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
@@ -934,6 +969,7 @@ def main() -> None:
             top_k=args.top_k,
             page_limit=args.page_limit,
             object_limit=args.object_limit,
+            rescue_query_limit=args.rescue_query_limit,
         )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc

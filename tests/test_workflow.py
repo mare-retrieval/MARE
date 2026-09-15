@@ -313,6 +313,9 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     assert query_step["retrieval_query"] == "exact evidence for what onboarding items are required"
     assert query_step["results"][0]["snippet"] == "The onboarding checklist requires completing payroll forms before system access."
     assert query_step["evidence_rescue"]["attempted"] is True
+    assert query_step["evidence_rescue"]["strategy"] == "parallel_multi_query"
+    assert query_step["evidence_rescue"]["query_limit"] == 2
+    assert query_step["evidence_rescue"]["elapsed_ms"] >= 0.0
     assert query_step["evidence_rescue"]["improved"] is True
     assert query_step["evidence_rescue"]["best_query"] == "exact evidence for what onboarding items are required"
     assert query_step["evidence_rescue"]["attempts"][0]["query"] == "exact evidence for what onboarding items are required"
@@ -320,6 +323,24 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     assert query_step["evidence_rescue"]["attempts"][0]["top_citation"] == "employee-onboarding.docx | page 3"
     assert query_step["agent_contract"]["may_answer"] is True
     assert query_step["agent_contract"]["recommended_action"] == "answer_with_citations"
+
+
+def test_build_workflow_payload_can_disable_evidence_rescue() -> None:
+    payload = _build_workflow_payload(
+        _WeakThenRescuedApp(),
+        query="what onboarding items are required",
+        object_query="onboarding required",
+        object_type="section",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+        rescue_query_limit=0,
+    )
+
+    rescue = payload["steps"]["query_corpus"]["evidence_rescue"]
+    assert rescue["attempted"] is False
+    assert rescue["query_limit"] == 0
+    assert rescue["queries"] == []
 
 
 def test_build_workflow_payload_rescues_poor_quality_evidence() -> None:
