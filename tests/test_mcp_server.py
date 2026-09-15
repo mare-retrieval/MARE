@@ -7,6 +7,8 @@ from mare.mcp_server import (
     _attach_remote_asset_urls,
     _normalize_media_path,
     _normalize_public_base_url,
+    _require_allowed_local_path,
+    _validate_public_http_url,
     describe_corpus_tool,
     ingest_document_tool,
     ingest_pdf_tool,
@@ -217,6 +219,52 @@ def test_asset_url_returns_empty_without_public_base(monkeypatch) -> None:
 def test_normalize_helpers_trim_paths() -> None:
     assert _normalize_public_base_url("https://demo.ngrok-free.app/") == "https://demo.ngrok-free.app"
     assert _normalize_media_path("media/") == "/media"
+
+
+def test_validate_public_http_url_rejects_private_hosts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "mare.mcp_server.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("127.0.0.1", 80))],
+    )
+
+    try:
+        _validate_public_http_url("http://localhost/manual.pdf")
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected a private URL to be rejected.")
+
+    assert "private" in message
+
+
+def test_validate_public_http_url_accepts_public_hosts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "mare.mcp_server.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+
+    parsed = _validate_public_http_url("https://example.com/manual.pdf")
+
+    assert parsed.hostname == "example.com"
+
+
+def test_remote_local_path_access_is_restricted_to_working_directory(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    inside = workspace / "manual.pdf"
+    outside = tmp_path / "outside.pdf"
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr("mare.mcp_server._RESTRICT_LOCAL_PATHS", True)
+
+    assert _require_allowed_local_path(inside) == inside.resolve()
+    try:
+        _require_allowed_local_path(outside)
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected an out-of-root path to be rejected.")
+
+    assert "working directory" in message
 
 
 def test_ingest_pdf_url_tool_downloads_then_ingests(monkeypatch, tmp_path: Path) -> None:
