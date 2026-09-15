@@ -14,7 +14,7 @@ from mare.eval import (
     evaluate_corpus,
     load_eval_cases,
 )
-from mare.types import Document, DocumentObject, ObjectType
+from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
 
 
 def _docs() -> list[Document]:
@@ -100,6 +100,42 @@ def test_evaluate_cases_reports_hits_and_no_result_accuracy() -> None:
     assert results[0].evidence_quality_status in {"high", "usable", "limited", "poor"}
     assert summary.answerable_cases == 2
     assert summary.usable_quality_rate >= 0.0
+    assert summary.mean_reciprocal_rank >= 0.0
+    assert summary.average_latency_ms >= 0.0
+
+
+def test_evaluate_cases_reports_rank_aware_metrics() -> None:
+    class _RankedApp:
+        def retrieve(self, query: str, top_k: int = 3):
+            return [
+                RetrievalHit(
+                    doc_id="wrong",
+                    title="Wrong",
+                    page=1,
+                    modality=Modality.TEXT,
+                    score=0.9,
+                    reason="first",
+                ),
+                RetrievalHit(
+                    doc_id="expected",
+                    title="Expected",
+                    page=2,
+                    modality=Modality.TEXT,
+                    score=0.8,
+                    reason="second",
+                ),
+            ][:top_k]
+
+    summary, results = evaluate_cases(
+        _RankedApp(),
+        [EvalCase(query="target", expected_doc_id="expected", expected_page=2, top_k=2)],
+    )
+
+    assert results[0].first_relevant_rank == 2
+    assert results[0].reciprocal_rank == 0.5
+    assert results[0].relevant_at_k is True
+    assert summary.relevant_at_k == 1
+    assert summary.mean_reciprocal_rank == 0.5
 
 
 def test_evaluate_corpus_runs_end_to_end(tmp_path: Path) -> None:
@@ -221,6 +257,8 @@ def test_format_comparison_output_recommends_best_stack() -> None:
     assert output["recommendation"]["best_stack"] == "fastembed"
     assert output["recommendation"]["ranking"][0]["stack"] == "fastembed"
     assert "usable_quality_rate" in output["recommendation"]["ranking"][0]
+    assert "mean_reciprocal_rank" in output["recommendation"]["ranking"][0]
+    assert "recall_at_k" in output["recommendation"]["ranking"][0]
     assert output["recommendation"]["ranking"][0]["score"] > output["recommendation"]["ranking"][1]["score"]
     assert "evidence-quality" in output["recommendation"]["reason"]
     assert "comparison" in output

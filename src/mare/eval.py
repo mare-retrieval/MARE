@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -40,6 +41,10 @@ class EvalCaseResult:
     support_status: str = "unknown"
     evidence_quality_status: str = "unknown"
     proof_asset_count: int = 0
+    first_relevant_rank: int | None = None
+    reciprocal_rank: float = 0.0
+    relevant_at_k: bool = False
+    latency_ms: float = 0.0
 
 
 @dataclass
@@ -52,6 +57,9 @@ class EvalSummary:
     answerable_cases: int = 0
     high_quality: int = 0
     usable_or_high_quality: int = 0
+    relevant_at_k: int = 0
+    mean_reciprocal_rank: float = 0.0
+    average_latency_ms: float = 0.0
 
     @property
     def page_hit_rate(self) -> float:
@@ -93,11 +101,24 @@ def create_app_for_stack(documents, stack: str) -> MAREApp:
     raise ValueError(f"Unsupported stack '{stack}'. Expected one of: {', '.join(SUPPORTED_STACKS)}")
 
 
+def _matches_expected_evidence(hit, case: EvalCase) -> bool:
+    checks = []
+    if case.expected_doc_id is not None:
+        checks.append(hit.doc_id == case.expected_doc_id)
+    if case.expected_page is not None:
+        checks.append(hit.page == case.expected_page)
+    if case.expected_object_type is not None:
+        checks.append(hit.object_type == case.expected_object_type)
+    return bool(checks) and all(checks)
+
+
 def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, list[EvalCaseResult]]:
     results: list[EvalCaseResult] = []
 
     for case in cases:
+        started_at = time.perf_counter()
         hits = app.retrieve(case.query, top_k=case.top_k)
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
         hit = hits[0] if hits else None
         evidence_payload = hits_to_evidence_payload(case.query, hits)
         evidence_brief = evidence_payload.get("evidence_brief") or {}
@@ -121,6 +142,12 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
             page_hit = False
             object_hit = False
 
+        first_relevant_rank = next(
+            (rank for rank, candidate in enumerate(hits, start=1) if _matches_expected_evidence(candidate, case)),
+            None,
+        )
+        reciprocal_rank = round(1 / first_relevant_rank, 4) if first_relevant_rank else 0.0
+
         results.append(
             EvalCaseResult(
                 query=case.query,
@@ -137,6 +164,10 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
                 support_status=support_status,
                 evidence_quality_status=evidence_quality_status,
                 proof_asset_count=proof_asset_count,
+                first_relevant_rank=first_relevant_rank,
+                reciprocal_rank=reciprocal_rank,
+                relevant_at_k=first_relevant_rank is not None,
+                latency_ms=latency_ms,
             )
         )
 
@@ -152,6 +183,13 @@ def evaluate_cases(app: MAREApp, cases: list[EvalCase]) -> tuple[EvalSummary, li
         usable_or_high_quality=sum(
             1 for item in answerable_results if item.evidence_quality_status in {"high", "usable"}
         ),
+        relevant_at_k=sum(1 for item in answerable_results if item.relevant_at_k),
+        mean_reciprocal_rank=round(
+            sum(item.reciprocal_rank for item in answerable_results) / len(answerable_results), 4
+        )
+        if answerable_results
+        else 0.0,
+        average_latency_ms=round(sum(item.latency_ms for item in results) / len(results), 3) if results else 0.0,
     )
     return summary, results
 
@@ -181,12 +219,7 @@ def _format_output(summary: EvalSummary, results: list[EvalCaseResult]) -> dict:
     return {
         "summary": {
             **asdict(summary),
-            "page_hit_rate": summary.page_hit_rate,
-            "doc_hit_rate": summary.doc_hit_rate,
-            "object_hit_rate": summary.object_hit_rate,
-            "no_result_accuracy": summary.no_result_accuracy,
-            "high_quality_rate": summary.high_quality_rate,
-            "usable_quality_rate": summary.usable_quality_rate,
+            **_summary_metrics(summary),
         },
         "results": [asdict(result) for result in results],
     }
@@ -201,6 +234,11 @@ def _summary_metrics(summary: EvalSummary) -> dict[str, int | float]:
         "no_result_accuracy": summary.no_result_accuracy,
         "high_quality_rate": summary.high_quality_rate,
         "usable_quality_rate": summary.usable_quality_rate,
+        "recall_at_k": round(summary.relevant_at_k / summary.answerable_cases, 4)
+        if summary.answerable_cases
+        else 0.0,
+        "mean_reciprocal_rank": summary.mean_reciprocal_rank,
+        "average_latency_ms": summary.average_latency_ms,
     }
 
 
@@ -215,11 +253,13 @@ def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCa
     ranking = []
     for stack, (summary, _) in reports.items():
         score = round(
-            (0.3 * summary.page_hit_rate)
-            + (0.25 * summary.doc_hit_rate)
-            + (0.15 * summary.object_hit_rate)
+            (0.2 * summary.page_hit_rate)
+            + (0.15 * summary.doc_hit_rate)
+            + (0.1 * summary.object_hit_rate)
             + (0.15 * summary.usable_quality_rate)
             + (0.1 * summary.high_quality_rate)
+            + (0.15 * summary.mean_reciprocal_rank)
+            + (0.1 * (summary.relevant_at_k / summary.answerable_cases if summary.answerable_cases else 0.0))
             + (0.05 * summary.no_result_accuracy),
             4,
         )
@@ -239,6 +279,8 @@ def _comparison_recommendation(reports: dict[str, tuple[EvalSummary, list[EvalCa
             item["object_hit_rate"],
             item["usable_quality_rate"],
             item["high_quality_rate"],
+            item["mean_reciprocal_rank"],
+            item["recall_at_k"],
             item["no_result_accuracy"],
         ),
         reverse=True,
@@ -261,12 +303,7 @@ def _format_comparison_output(reports: dict[str, tuple[EvalSummary, list[EvalCas
             stack: {
                 "summary": {
                     **asdict(summary),
-                    "page_hit_rate": summary.page_hit_rate,
-                    "doc_hit_rate": summary.doc_hit_rate,
-                    "object_hit_rate": summary.object_hit_rate,
-                    "no_result_accuracy": summary.no_result_accuracy,
-                    "high_quality_rate": summary.high_quality_rate,
-                    "usable_quality_rate": summary.usable_quality_rate,
+                    **_summary_metrics(summary),
                 },
                 "results": [asdict(result) for result in results],
             }
