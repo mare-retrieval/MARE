@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import inspect
+import socket
 import sys
 import urllib.parse
 import urllib.request
@@ -14,6 +16,9 @@ from mare.integrations import hits_to_evidence_payload
 
 _PUBLIC_BASE_URL = ""
 _MEDIA_PATH = "/media"
+_RESTRICT_LOCAL_PATHS = False
+_DOWNLOAD_TIMEOUT_SECONDS = 20
+_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 
 
 def _safe_download_dir() -> Path:
@@ -22,13 +27,50 @@ def _safe_download_dir() -> Path:
     return path
 
 
-def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
-    parsed = urllib.parse.urlparse(pdf_url)
+def _require_allowed_local_path(path: str | Path) -> Path:
+    candidate = Path(path).expanduser().resolve()
+    if _RESTRICT_LOCAL_PATHS and not candidate.is_relative_to(Path.cwd().resolve()):
+        raise ValueError("Remote MCP file access is restricted to the server working directory.")
+    return candidate
+
+
+def _validate_public_http_url(url: str) -> urllib.parse.ParseResult:
+    parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("pdf_url must use http or https.")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("pdf_url must contain a public host and must not include credentials.")
+
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        }
+    except socket.gaierror as exc:
+        raise ValueError("pdf_url host could not be resolved.") from exc
+    if not addresses:
+        raise ValueError("pdf_url host could not be resolved.")
+    for address in addresses:
+        try:
+            resolved = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError as exc:
+            raise ValueError("pdf_url resolved to an invalid address.") from exc
+        if not resolved.is_global:
+            raise ValueError("pdf_url must not resolve to a private, loopback, link-local, or reserved address.")
+    return parsed
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
+    parsed = _validate_public_http_url(pdf_url)
 
     if download_path:
-        target = Path(download_path)
+        target = _require_allowed_local_path(download_path)
     else:
         name = Path(parsed.path).name or "downloaded.pdf"
         if not name.lower().endswith(".pdf"):
@@ -38,8 +80,18 @@ def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
         target = _safe_download_dir() / f"{stem}-{digest}.pdf"
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(pdf_url) as response:
-        payload = response.read()
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
+    request = urllib.request.Request(pdf_url, headers={"User-Agent": "mare-retrieval"})
+    with opener.open(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
+        _validate_public_http_url(response.geturl())
+        declared_length = response.headers.get("Content-Length")
+        if declared_length and int(declared_length) > _MAX_DOWNLOAD_BYTES:
+            raise ValueError("PDF download exceeds the 25 MiB limit.")
+        payload = response.read(_MAX_DOWNLOAD_BYTES + 1)
+    if len(payload) > _MAX_DOWNLOAD_BYTES:
+        raise ValueError("PDF download exceeds the 25 MiB limit.")
+    if not payload.startswith(b"%PDF-"):
+        raise ValueError("Downloaded content is not a PDF.")
     target.write_bytes(payload)
     return target
 
@@ -120,6 +172,9 @@ def ingest_pdf_tool(
     reuse: bool = False,
     parser: str = "builtin",
 ) -> dict[str, Any]:
+    _require_allowed_local_path(pdf_path)
+    if output_path:
+        _require_allowed_local_path(output_path)
     app = load_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
     return {
         "pdf_path": str(pdf_path),
@@ -137,6 +192,9 @@ def ingest_document_tool(
     reuse: bool = False,
     parser: str = "builtin",
 ) -> dict[str, Any]:
+    _require_allowed_local_path(document_path)
+    if output_path:
+        _require_allowed_local_path(output_path)
     app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
     return {
         "document_path": str(document_path),
@@ -156,6 +214,9 @@ def query_pdf_tool(
     parser: str = "builtin",
     top_k: int = 3,
 ) -> dict[str, Any]:
+    _require_allowed_local_path(pdf_path)
+    if output_path:
+        _require_allowed_local_path(output_path)
     app = load_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
@@ -178,6 +239,9 @@ def query_document_tool(
     parser: str = "builtin",
     top_k: int = 3,
 ) -> dict[str, Any]:
+    _require_allowed_local_path(document_path)
+    if output_path:
+        _require_allowed_local_path(output_path)
     app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
@@ -233,6 +297,7 @@ def query_pdf_url_tool(
 
 
 def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3) -> dict[str, Any]:
+    _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
@@ -242,6 +307,8 @@ def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3) -> dict[str,
 
 
 def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3) -> dict[str, Any]:
+    for corpus_path in corpus_paths:
+        _require_allowed_local_path(corpus_path)
     app = load_corpora(corpus_paths=corpus_paths)
     hits = app.retrieve(query=query, top_k=top_k)
     payload = hits_to_evidence_payload(query=query, hits=hits)
@@ -256,6 +323,7 @@ def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3) -> d
 
 
 def page_objects_tool(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:
+    _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
     objects = app.get_page_objects(doc_id, limit=limit)
     return {
@@ -276,6 +344,7 @@ def page_objects_tool(corpus_path: str, doc_id: str, limit: int = 10) -> dict[st
 
 
 def describe_corpus_tool(corpus_path: str, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
+    _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
     return app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
 
@@ -286,6 +355,7 @@ def search_objects_tool(
     object_type: str | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
+    _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
     return {
         "corpus_path": str(corpus_path),
@@ -313,7 +383,7 @@ def create_mcp_server():
         requested = (asset_path or "").lstrip("/")
         candidate = (Path.cwd() / requested).resolve()
         cwd = Path.cwd().resolve()
-        if not str(candidate).startswith(str(cwd)):
+        if not candidate.is_relative_to(cwd):
             return PlainTextResponse("Forbidden", status_code=403)
         if not candidate.is_file():
             return PlainTextResponse("Not Found", status_code=404)
@@ -525,7 +595,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    global _PUBLIC_BASE_URL, _MEDIA_PATH
+    global _PUBLIC_BASE_URL, _MEDIA_PATH, _RESTRICT_LOCAL_PATHS
     args = build_arg_parser().parse_args(argv)
     _PUBLIC_BASE_URL = _normalize_public_base_url(args.public_base_url)
     _MEDIA_PATH = _normalize_media_path(args.media_path)
@@ -548,6 +618,7 @@ def main(argv: list[str] | None = None) -> None:
         run(**accepted)
 
     transport = args.transport
+    _RESTRICT_LOCAL_PATHS = transport != "stdio"
     show_banner = not args.no_banner
     settings = getattr(server, "settings", None)
     if settings is not None:
