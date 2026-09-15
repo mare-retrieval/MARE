@@ -24,7 +24,7 @@ classifiers = [
 dependencies = ["pypdf>=4.0", "pypdfium2>=4.30.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pillow>=10.0.0"]
 publish = ["build>=1.2.0", "twine>=5.0.0"]
 ui = ["streamlit>=1.12,<2.0", "altair<5"]
 docling = ["docling>=2.70.0; python_version >= '3.10'"]
