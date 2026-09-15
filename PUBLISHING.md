@@ -77,6 +77,25 @@ It will publish when:
 6. Create a GitHub release for that version using the release notes file.
 7. Let GitHub Actions publish to PyPI.
 
+## Release cadence and version discipline
+
+PyPI versions are immutable once published: a version cannot be merged into another release or safely reused. Treat publication as a deliberate product milestone, not the completion step for each commit.
+
+- Accumulate related work on `main` and publish one coherent release after the milestone is complete.
+- Do not publish consecutive patch releases on the same day unless the later release fixes a critical packaging, security, or data-loss problem.
+- Before choosing a version, inspect the latest GitHub tag, the latest PyPI version, and the complete diff since that tag.
+- Use a patch version for compatible fixes, a minor version for a meaningful bundled capability, and a major version for intentional breaking changes.
+- Keep post-release commits unreleased until the next milestone is named, documented, tested, and approved as a bundle.
+- Never delete published history merely to make the version list look cleaner. If a release is quickly superseded, preserve it and clearly point users to the replacement.
+
+Before creating a GitHub release, explicitly confirm:
+
+1. The proposed version is not already present on PyPI.
+2. Release notes cover the full diff from the previous tag.
+3. CI passes on every supported Python version.
+4. Package build, metadata validation, and wheel smoke installation pass.
+5. The release is substantial enough to publish now instead of remaining on `main`.
+
 ## Install commands after release
 
 Once published, users will be able to install with:
