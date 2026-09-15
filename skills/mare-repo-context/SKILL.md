@@ -23,6 +23,7 @@ The product promise is:
 - ask questions and get grounded answers with proof
 - return file, page/line citation, snippet, highlight when available, and rationale
 - help with real document work such as finding, reviewing, comparing, summarizing, and extracting actions, requirements, risks, deadlines, or steps
+- show an Evidence Brief that makes source coverage, support strength, conflict hints, proof assets, evidence gaps, and next questions visible
 - keep outputs useful for both humans and agents
 
 Do not frame MARE primarily as:
@@ -40,6 +41,7 @@ Better framing when thinking bigger:
 Important nuance:
 
 - do not oversell unsupported breadth as if MARE already fully handles every document type or modality equally well
+- describe ColPali/ColQwen support as experimental, optional, and page-image based, not as the default retrieval path
 - do not lose the evidence-first core while broadening the product story
 - keep the current implementation grounded in mixed local documents, with PDFs still providing the strongest visual proof path
 
@@ -57,15 +59,24 @@ Treat these as real completed product capabilities, not just aspirations:
   - highlight rendering and object-region proof fallback
 - optional advanced retrieval paths that already exist:
   - hybrid semantic + lexical retrieval
+  - FastEmbed semantic retrieval
   - sentence-transformers retrieval
   - FAISS retrieval
   - Qdrant hybrid retrieval
+  - experimental ColPali/ColQwen visual page retrieval for rendered PDF page images
   - optional reranking such as FastEmbed
+- explicit retrieval stack selection now exists in:
+  - `mare workflow --retriever`
+  - `mare chat --retriever`
+  - `mare-eval --stack`
+  - `mare ui` retriever selector
+- ColPali/ColQwen visual retrieval should fail with a clear setup message when a corpus has no rendered PDF page images
 - stronger non-PDF citations using line, heading, and section-aware metadata when available
 - guided first-run entrypoint with:
   - `mare start`
   - path-aware onboarding for a folder, a PDF, a non-PDF document, or the bundled mixed-doc example
 - task-oriented chat commands:
+  - `:brief`
   - `:review`
   - `:steps`
   - `:compare`
@@ -79,7 +90,13 @@ Treat these as real completed product capabilities, not just aspirations:
   - `comparison`
   - `summary`
   - `findings`
+  - `evidence_brief`
   - `review`
+- agent-ready trust and control payloads with:
+  - `evidence_quality`
+  - `research_plan`
+  - top-level `agent_contract`
+  - stable evidence and provenance IDs for audit-friendly handoffs
 - richer MCP proof payloads with:
   - `best_evidence`
   - `proof_assets`
@@ -111,15 +128,15 @@ Treat these as one product with multiple modes:
 - `mare ui`
   - visual playground
   - best first-run path
-  - now includes onboarding guidance, review snapshot, grounded summary, grounded findings, and recent runs
+  - now includes onboarding guidance, Evidence Brief, review snapshot, grounded summary, grounded findings, and recent runs
 - `mare chat`
   - simple folder-based document agent
-  - includes review, compare, steps, summary, findings extraction, and saved session history
+  - includes Evidence Brief, review, compare, steps, summary, findings extraction, and saved session history
 - `mare ask`
   - fastest single-shot CLI
 - `mare workflow`
   - structured terminal workflow
-  - includes review view, comparison view, grounded summary, findings extraction, and saved run history
+  - includes `--task brief`, review view, comparison view, grounded summary, findings extraction, and saved run history
 - `mare mcp`
   - integration surface for MCP-capable clients and app platforms
 - `mare`
@@ -157,6 +174,7 @@ Keep these user jobs in mind when shaping the product:
 - extract steps, procedures, or checklists from manuals and SOPs
 - extract actions, requirements, risks, and deadlines from operational or policy documents
 - produce grounded summaries or briefs for a narrow task
+- inspect support strength, evidence gaps, and next evidence-seeking questions before trusting an answer
 - support small operational work without forcing users to read everything manually
 
 For enterprise-facing thinking, favor:
@@ -182,6 +200,7 @@ Read these files before release work:
 - `setup.py`
 - `PUBLISHING.md`
 - latest `releases/RELEASE_NOTES_*.md`
+- `LAUNCH_PLAN.md` for market-facing Evidence Brief messaging
 
 Current release train has recently included:
 
@@ -190,8 +209,24 @@ Current release train has recently included:
 - `v0.4.2`
 - `v0.4.3`
 - `v0.4.4`
+- `v0.4.5` as the Evidence Brief release
+- `v0.4.6` as the Agentic Evidence Planning release
+
+Post-`v0.4.6` work already on `main` includes evidence-quality signals and stable evidence provenance IDs. Treat those changes as the basis for the next release rather than describing them as part of the published `v0.4.6` package.
 
 Check the current version directly from `pyproject.toml` instead of assuming.
+
+## Market positioning
+
+For launch, visibility, README, demo, or public positioning work, read:
+
+- `references/market-positioning.md`
+- `AGENT_INTEGRATIONS.md`
+
+Current public wedge:
+
+- Evidence Briefs are the clearest market-facing differentiator because they turn agentic-RAG trust into a visible product surface: source coverage, support strength, conflict hints, proof assets, evidence gaps, and next questions.
+- For OpenClaw and Hermes, position MARE as a local document-evidence tool through CLI or MCP first. Do not claim native plugin support until a packaged integration exists.
 
 ## MCP / Create App direction
 
@@ -270,11 +305,12 @@ The main repo regression command currently used to validate the active product s
 pytest tests/test_workflow.py tests/test_chat.py tests/test_streamlit_app.py tests/test_ui.py tests/test_api.py tests/test_extensibility.py tests/test_integrations.py tests/test_objects.py tests/test_mcp_server.py
 ```
 
-The targeted release-prep validation from this chat reached:
+Latest verified repository validation:
 
-- `76 passed` on the main workflow/chat/UI/integrations/MCP slice
-- `python -m build --no-isolation` passed
-- `python -m twine check dist/mare-retrieval-0.4.3.tar.gz dist/mare_retrieval-0.4.3-py3-none-any.whl` passed
+- `171 passed` with the full `pytest -q` suite on 2026-09-14
+- `git diff --check` passed for the pending repository-context update
+
+Run fresh build and Twine checks against the next version before publishing; do not rely on the older v0.4.3 artifact validation.
 
 ## Read next
 

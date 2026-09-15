@@ -31,6 +31,7 @@ Today MARE already solves a meaningful first slice:
 - retrieve relevant pages and objects
 - show snippet, citation, and visual proof when available
 - support simple document work like review, compare, summary, findings extraction, and steps
+- expose Evidence Briefs that make source coverage, support strength, conflict hints, proof assets, gaps, and next questions explicit
 - expose the same grounded evidence engine to humans and agents
 
 That means the roadmap should mostly strengthen usefulness, trust, and retrieval quality rather than invent a new core.
@@ -63,6 +64,7 @@ The product should feel impressive when it can do all of the following in one fl
 - find the right answer quickly
 - point to the exact supporting page, region, snippet, or object
 - explain why that evidence was chosen
+- say when support is weak or incomplete
 - help the user do something concrete with the document set
 
 The "wow" should come from grounded usefulness, not generic generation.
@@ -161,6 +163,9 @@ Important examples of high-value tasks:
 Current status:
 
 - the first release-worthy grounded extraction slice is now present across chat, workflow, UI, and shared payloads
+- Evidence Briefs are now present across chat, workflow, UI, and shared evidence payloads
+- research plans and agent contracts are shipped in v0.4.6
+- evidence-quality checks and stable provenance IDs are implemented on `main` after v0.4.6 and should anchor the next release
 - the next iteration should improve the quality and specificity of those extracted findings rather than re-adding the same categories
 
 ## High-impact later
@@ -178,6 +183,7 @@ Focus:
 - richer OCR and layout-aware parsing
 - stronger table extraction
 - figure and caption linkage
+- evaluate experimental ColPali/ColQwen visual page retrieval on visual PDFs before promoting it beyond opt-in status
 - section-aware region grounding
 - better visual proof for camera-captured or scanned pages
 
@@ -230,12 +236,32 @@ Important nuance:
 
 These are worth exploring only after the core trust loop is stronger.
 
-- query rewriting for vague user questions
-- evidence confidence or support-strength scoring
+- broader query rewriting for vague user questions
+- calibration of the implemented evidence-quality and support-strength signals against representative corpora
 - answer drafting styles for different surfaces
 - guided workflows for specific document domains
 - lightweight proactive suggestions after retrieval
+- richer Evidence Brief ranking signals such as per-evidence support reasons and stronger contradiction analysis
 - richer review templates for contracts, SOPs, onboarding packets, and policy docs
+
+## Market positioning guidance
+
+When trying to land MARE publicly, frame it around the 2026 market pull:
+
+- agentic AI needs trustworthy retrieval and inspectable evidence before it can safely act
+- enterprises are moving away from naive vector-only RAG toward hybrid retrieval, GraphRAG/context engines, MCP-connected tools, and governed workflows
+- document AI pain is still concentrated in messy PDFs, tables, scanned docs, citations, and retrieval evaluation
+- developers want local-first, inspectable building blocks that can feed agents without becoming a full agent framework
+
+Best short public positioning:
+
+- "MARE is the document evidence layer for agents and developers: ask a folder a question, get the exact proof, source coverage, support strength, conflict hints, gaps, and next questions."
+
+Best visibility wedge:
+
+- show side-by-side examples where generic chat answers confidently, while MARE returns citation, snippet, highlight, support label, and evidence gaps
+- make the `--task brief` demo the first public "wow" flow because it matches the market demand for trust, governance, and retrieval observability
+- target builders working on MCP servers, RAG pipelines, support docs, compliance workflows, SOPs, manuals, policies, contracts, and local/private document analysis
 
 ## Practical prioritization
 

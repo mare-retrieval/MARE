@@ -14,6 +14,11 @@ That wording matters because it preserves both truth and ambition:
 - the repo is no longer only a PDF-only story
 - mixed-document local workflows are already real
 - agent and app integrations now have richer evidence payloads
+- Evidence Briefs now expose source coverage, support strength, conflict hints, proof assets, evidence gaps, and next evidence-seeking questions
+- agent contracts now tell downstream agents whether they may answer, why they should stop, and which evidence-seeking action is recommended
+- Evidence Briefs now include evidence-quality checks, research plans, and stable evidence provenance IDs for inspectable handoffs
+- optional FastEmbed semantic retrieval and experimental ColPali/ColQwen visual page retrieval now exist as opt-in advanced paths
+- workflow, chat, eval, and UI surfaces now expose explicit retrieval stack selection for optional retrievers
 - the public repo and release packaging now reflect that mixed-document story more honestly
 
 The most useful product ladder is:
@@ -39,6 +44,7 @@ Current local document-first path supports:
 Important nuance:
 
 - PDF still has the strongest visual proof story
+- ColPali/ColQwen support is experimental and only applies when rendered page images exist
 - non-PDF docs rely more on snippet + citation proof
 - line/heading-aware citations now exist for markdown/text-style flows
 
@@ -50,12 +56,14 @@ The repo now has a much more coherent multi-surface product:
   - visual playground
   - mixed-document uploads
   - onboarding-first start state
+  - Evidence Brief section
   - document review snapshot
   - grounded summary section
   - grounded findings section
   - recent runs sidebar persistence
 - `mare chat`
   - mixed-document folder chat
+  - `:brief`
   - `:review`
   - `:steps`
   - `:compare`
@@ -67,6 +75,7 @@ The repo now has a much more coherent multi-surface product:
   - saved session history
 - `mare workflow`
   - mixed-document folder workflow
+  - `--task brief`
   - `--task review`
   - structured comparison view
   - structured summary payload
@@ -81,6 +90,7 @@ The repo now has a much more coherent multi-surface product:
   - remote-friendly proof URLs when configured
 - `mare start`
   - guided first-run entrypoint
+  - recommends the trust-first Evidence Brief path for folders and bundled examples
   - path-aware recommendations for folders, PDFs, non-PDF docs, and the bundled mixed-doc example
 
 ### Grounded task flows
@@ -93,6 +103,7 @@ MARE now supports meaningful lightweight document work:
 - summarize grounded evidence
 - extract steps/procedure-like content
 - extract actions, requirements, risks, and deadlines from the retrieved evidence
+- show an Evidence Brief that explains support level, source coverage, conflict hints, available proof assets, evidence gaps, and useful next questions
 
 This is important because the product is no longer just retrieval plus pretty output. It has the beginning of real document-work task flows.
 
@@ -109,6 +120,7 @@ Current query path, at a high level:
 - structure and object boosts
 - late fusion across selected modalities
 - optional reranking
+- optional FastEmbed and experimental visual page retrieval when configured
 - snippet selection
 - page highlight or object-region proof rendering
 - explainable result payloads
@@ -159,11 +171,13 @@ Shared payloads can include:
 - `comparison`
 - `summary`
 - `findings`
+- `evidence_brief`
 - `review`
 - `best_evidence`
 - `proof_assets`
 - `primary_proof_asset`
 - `proof_links`
+- `agent_contract`
 
 That richer shape is now used across:
 
@@ -215,11 +229,37 @@ Each finding bucket can include:
 - `item_count`
 - `items`
 
+The evidence brief model currently includes:
+
+- `overview`
+- `support`
+- `source_count`
+- `source_documents`
+- `source_diversity`
+- `conflict_hints`
+- `available_proof_assets`
+- `evidence_gaps`
+- `next_questions`
+- `evidence_quality`
+- `research_plan`
+- `top_provenance`
+
+Individual evidence results now carry stable `evidence_id` and provenance metadata so results can be referenced across workflow steps and agent handoffs without relying only on rank order.
+
+The top-level agent contract currently includes:
+
+- `may_answer`
+- `recommended_action`
+- `stop_reasons`
+- support, source-diversity, evidence-quality, and research-plan status
+- the concrete `research_plan`
+
 The review model currently includes:
 
 - `overview`
 - `best_evidence`
 - `support`
+- `evidence_brief`
 - `summary_overview`
 - `comparison_count`
 - `finding_counts`
@@ -260,21 +300,25 @@ Key areas that changed meaningfully in this chat:
 
 - `src/mare/chat.py`
   - mixed-folder support
+  - `:brief`
   - review + task commands
   - chat history
 - `src/mare/workflow.py`
   - document-first workflow loading
+  - `--task brief`
   - review + comparison + summary + findings payload structure
   - workflow history
 - `src/mare/streamlit_app.py`
   - mixed uploads
   - onboarding guidance
+  - Evidence Brief section
   - review snapshot
   - recent runs
   - grounded summary + findings UI
 - `src/mare/integrations.py`
   - shared evidence payload structure
-  - comparison + summary + findings + review helpers
+  - comparison + summary + findings + evidence brief + review helpers
+  - evidence-quality, research-plan, agent-contract, and stable provenance helpers
   - new LangChain/LlamaIndex tool adapters
 - `src/mare/mcp_server.py`
   - document-first MCP tools
@@ -287,8 +331,18 @@ Key areas that changed meaningfully in this chat:
   - runnable mixed-document workspace
 - `examples/mixed_docs_workflow.py`
   - mixed-doc workflow demo
+- `examples/evidence_brief_demo.py`
+  - trust-first mixed-doc Evidence Brief demo for launch/readme usage
 - `releases/`
   - versioned release notes moved out of the repo root for a cleaner public layout
+- `LAUNCH_PLAN.md`
+  - public launch messaging for the Evidence Brief release
+
+## Release position
+
+- PyPI and GitHub releases are current through `v0.4.6`, the Agentic Evidence Planning release.
+- `main` contains two post-release capability commits: evidence-quality signals and stable evidence provenance IDs.
+- Those post-release changes are the current basis for a future `v0.4.7`; they are not part of the published `v0.4.6` artifacts.
 
 ## How the product should be described now
 
@@ -297,6 +351,7 @@ Good description:
 - point MARE at a document or folder
 - ask questions and get grounded evidence
 - review, compare, summarize, and extract actions, requirements, risks, deadlines, or steps
+- inspect support, proof assets, gaps, and next questions before trusting an answer
 - keep outputs inspectable for humans and usable for agents
 
 Descriptions to avoid:
