@@ -39,6 +39,8 @@ jobs:
 
       - name: Build distributions
         run: python -m build
+      - name: Verify internal skills are not tracked or packaged
+        run: python scripts/check_public_artifacts.py
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
