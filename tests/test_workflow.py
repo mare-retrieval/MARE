@@ -181,6 +181,29 @@ def test_default_output_path_uses_generated_folder() -> None:
     assert output == Path("generated/manual.json")
 
 
+def test_load_app_keeps_same_name_sources_separate(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    first = tmp_path / "first" / "guide.md"
+    second = tmp_path / "second" / "guide.md"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("# Setup\nConnect the red adapter to the device.\n")
+    second.write_text("# Setup\nConnect the blue adapter to the device.\n")
+
+    app = _load_app(documents=[str(first), str(second)], corpora=[], parser="builtin")
+
+    assert len(app.corpus_paths) == 2
+    assert len(set(app.corpus_paths)) == 2
+    assert all(path.exists() for path in app.corpus_paths)
+    assert len({document.doc_id for document in app.documents}) == 2
+    assert len({obj.object_id for document in app.documents for obj in document.objects}) == sum(
+        len(document.objects) for document in app.documents
+    )
+    hits = app.retrieve("connect adapter", top_k=2)
+    assert len(hits) == 2
+    assert {hit.metadata["source"] for hit in hits} == {str(first), str(second)}
+
+
 def test_discover_folder_inputs_supports_include_and_exclude(tmp_path: Path) -> None:
     (tmp_path / "guide.md").write_text("# guide")
     (tmp_path / "manual.pdf").write_text("pdf")

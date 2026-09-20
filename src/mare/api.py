@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections import Counter
+import hashlib
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import re
 from typing import Any
@@ -65,9 +67,27 @@ class MAREApp:
     @classmethod
     def from_corpora(cls, corpus_paths: list[str | Path], config: MAREConfig | None = None) -> "MAREApp":
         paths = [Path(path) for path in corpus_paths]
-        documents: list[Document] = []
+        loaded: list[tuple[Path, Document]] = []
         for path in paths:
-            documents.extend(load_documents(path))
+            loaded.extend((path, document) for document in load_documents(path))
+        counts = Counter(document.doc_id for _, document in loaded)
+        documents: list[Document] = []
+        for index, (path, document) in enumerate(loaded):
+            if counts[document.doc_id] == 1:
+                documents.append(document)
+                continue
+            namespace = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:10]
+            doc_id = f"{document.doc_id}@{namespace}-{index}"
+            documents.append(
+                replace(
+                    document,
+                    doc_id=doc_id,
+                    objects=[
+                        replace(obj, doc_id=doc_id, object_id=f"{obj.object_id}@{namespace}-{index}")
+                        for obj in document.objects
+                    ],
+                )
+            )
         source_documents = cls._source_documents_from_documents(documents)
         primary_source = source_documents[0] if len(source_documents) == 1 else None
         return cls(

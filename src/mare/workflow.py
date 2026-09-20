@@ -4,8 +4,10 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import fnmatch
+import hashlib
 import json
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -188,7 +190,10 @@ def _discover_folder_inputs(
     return documents, corpora
 
 
-def _default_output_path(source_path: Path) -> Path:
+def _default_output_path(source_path: Path, *, disambiguate: bool = False) -> Path:
+    if disambiguate:
+        digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:12]
+        return Path("generated") / f"{source_path.stem}-{digest}.json"
     return Path("generated") / f"{source_path.stem}.json"
 
 
@@ -477,10 +482,16 @@ def _load_app(
             config=config,
         )
 
-    for source_path in resolved_documents:
+    default_paths = [_default_output_path(Path(source_path)) for source_path in resolved_documents]
+    path_counts = Counter(default_paths)
+    occupied = {str(Path(path).resolve()) for path in resolved_corpora}
+    for source_path, default_path in zip(resolved_documents, default_paths):
+        collision = path_counts[default_path] > 1 or str(default_path.resolve()) in occupied
+        output_path = _default_output_path(Path(source_path), disambiguate=collision)
+        occupied.add(str(output_path.resolve()))
         app = load_document(
             source_path=source_path,
-            output_path=_default_output_path(Path(source_path)),
+            output_path=output_path,
             reuse=reuse,
             parser=parser,
             config=config,
