@@ -4,7 +4,7 @@ from pathlib import Path
 
 import json
 
-from mare.chat import _build_app_from_args, _discover_folder_inputs, build_session_store, run_chat
+from mare.chat import _build_app_from_args, _build_chat_payload, _discover_folder_inputs, build_arg_parser, build_session_store, run_chat
 from mare.extensions import MAREConfig
 from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 
@@ -496,6 +496,38 @@ def test_run_chat_shows_and_saves_evidence_rescue(monkeypatch, capsys, tmp_path:
     assert payload["entries"][0]["top_result"]["evidence_rescue"] == "improved"
     assert "Evidence quality: High evidence quality" in output
     assert "Evidence rescue: improved" in output
+
+
+def test_chat_rescue_budget_can_disable_alternate_queries() -> None:
+    args = build_arg_parser().parse_args(["--rescue-query-limit", "0", "--rescue-timeout-seconds", "0.25"])
+    payload = _build_chat_payload(
+        _WeakThenRescuedApp(),
+        query="what onboarding items are required",
+        top_k=3,
+        page_limit=3,
+        object_limit=5,
+        rescue_query_limit=args.rescue_query_limit,
+        rescue_timeout_seconds=args.rescue_timeout_seconds,
+    )
+    rescue = payload["steps"]["query_corpus"]["evidence_rescue"]
+    assert rescue["attempted"] is False
+    assert rescue["query_limit"] == 0
+    assert rescue["timeout_seconds"] == 0.25
+
+
+def test_run_chat_forwards_rescue_budget(monkeypatch) -> None:
+    captured = []
+    answers = iter(["question", ":quit"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    def fake_payload(_app, **kwargs):
+        captured.append(kwargs)
+        return None
+
+    monkeypatch.setattr("mare.chat._build_chat_payload", fake_payload)
+    run_chat(_FakeApp(), rescue_query_limit=0, rescue_timeout_seconds=0.25)
+    assert captured[0]["rescue_query_limit"] == 0
+    assert captured[0]["rescue_timeout_seconds"] == 0.25
 
 
 def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:

@@ -561,6 +561,8 @@ def _build_chat_payload(
     top_k: int,
     page_limit: int,
     object_limit: int,
+    rescue_query_limit: int = 2,
+    rescue_timeout_seconds: float = 5.0,
 ) -> dict | None:
     try:
         return _build_workflow_payload(
@@ -571,6 +573,8 @@ def _build_chat_payload(
             top_k=top_k,
             page_limit=page_limit,
             object_limit=object_limit,
+            rescue_query_limit=rescue_query_limit,
+            rescue_timeout_seconds=rescue_timeout_seconds,
         )
     except RuntimeError as exc:
         print(str(exc))
@@ -605,9 +609,23 @@ def run_chat(
     top_k: int = 3,
     page_limit: int = 3,
     object_limit: int = 5,
+    rescue_query_limit: int = 2,
+    rescue_timeout_seconds: float = 5.0,
     session_store: ChatSessionStore | None = None,
 ) -> None:
     _print_intro(app)
+
+    def build_payload(query: str) -> dict | None:
+        return _build_chat_payload(
+            app,
+            query=query,
+            top_k=top_k,
+            page_limit=page_limit,
+            object_limit=object_limit,
+            rescue_query_limit=rescue_query_limit,
+            rescue_timeout_seconds=rescue_timeout_seconds,
+        )
+
     while True:
         try:
             raw = input("mare> ").strip()
@@ -650,7 +668,7 @@ def run_chat(
                 print("Usage: :compare <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             _print_comparison(payload)
@@ -663,7 +681,7 @@ def run_chat(
                 print("Usage: :summary <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             _print_summary(payload)
@@ -676,7 +694,7 @@ def run_chat(
                 print("Usage: :brief <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             _print_evidence_brief(payload)
@@ -689,7 +707,7 @@ def run_chat(
                 print("Usage: :contract <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             _print_agent_contract(payload)
@@ -702,7 +720,7 @@ def run_chat(
                 print("Usage: :review <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             _print_review(payload)
@@ -725,7 +743,7 @@ def run_chat(
                 print("Usage: :json <question>")
                 print("")
                 continue
-            payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(query)
             if payload is None:
                 continue
             print(json.dumps(payload, indent=2))
@@ -741,7 +759,7 @@ def run_chat(
                     print(f"Usage: {prefix} <question>")
                     print("")
                     break
-                payload = _build_chat_payload(app, query=query, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+                payload = build_payload(query)
                 if payload is None:
                     break
                 _print_findings(payload, command_name)
@@ -749,7 +767,7 @@ def run_chat(
                     session_store.append(entry_type=command_name, query=query, payload=payload)
                 break
         else:
-            payload = _build_chat_payload(app, query=raw, top_k=top_k, page_limit=page_limit, object_limit=object_limit)
+            payload = build_payload(raw)
             if payload is None:
                 continue
             _print_answer(payload)
@@ -802,6 +820,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=3, help="How many retrieval hits to consider")
     parser.add_argument("--page-limit", type=int, default=3, help="How many pages to include in summaries")
     parser.add_argument("--object-limit", type=int, default=5, help="How many objects to include in summaries")
+    parser.add_argument(
+        "--rescue-query-limit",
+        type=int,
+        choices=range(0, 9),
+        default=2,
+        metavar="0-8",
+        help="Maximum alternate queries when evidence is weak. Use 0 to disable rescue.",
+    )
+    parser.add_argument(
+        "--rescue-timeout-seconds",
+        type=float,
+        default=5.0,
+        help="Maximum time to wait for alternate retrieval queries. Running threads cannot be forcibly stopped.",
+    )
     parser.add_argument("--filter-doc-id", action="append", default=[], help="Only retrieve from this document ID. Repeatable.")
     parser.add_argument("--filter-source", action="append", default=[], help="Only retrieve from this source path or filename. Repeatable.")
     parser.add_argument("--filter-page", action="append", type=int, default=[], help="Only retrieve from this page. Repeatable.")
@@ -846,6 +878,8 @@ def main() -> None:
         top_k=args.top_k,
         page_limit=args.page_limit,
         object_limit=args.object_limit,
+        rescue_query_limit=args.rescue_query_limit,
+        rescue_timeout_seconds=args.rescue_timeout_seconds,
         session_store=session_store,
     )
 
