@@ -115,6 +115,8 @@ class ChatSessionStore:
 def _evidence_rescue_history_status(evidence_rescue: dict) -> str:
     if evidence_rescue.get("improved"):
         return "improved"
+    if evidence_rescue.get("timed_out"):
+        return "timed_out"
     if evidence_rescue.get("attempted"):
         return "attempted"
     return ""

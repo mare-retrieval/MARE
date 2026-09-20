@@ -36,7 +36,7 @@ The most common fix is to open the `mare-retrieval` project on PyPI and update t
 - workflow: `publish.yml`
 - environment: `pypi`
 
-After updating the PyPI trusted publisher, rerun the failed GitHub Actions publish job or trigger the workflow manually.
+After updating the PyPI trusted publisher, rerun the failed GitHub Actions publish job for the existing release. The workflow has no manual trigger.
 
 ## Local release check
 
@@ -64,8 +64,7 @@ The repository includes `.github/workflows/publish.yml`.
 
 It will publish when:
 
-- a GitHub release is published
-- or the workflow is triggered manually
+- a GitHub release is published with a tag matching `v<pyproject.toml version>`
 
 ## Recommended release flow
 

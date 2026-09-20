@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from mare.workflow import (
     _print_evidence_brief,
     _print_findings,
     _print_review,
+    _print_rescue_summary,
     _print_pretty,
     build_history_store,
     main,
@@ -341,6 +343,38 @@ def test_build_workflow_payload_can_disable_evidence_rescue() -> None:
     assert rescue["attempted"] is False
     assert rescue["query_limit"] == 0
     assert rescue["queries"] == []
+
+
+def test_evidence_rescue_timeout_reports_only_completed_attempts(capsys) -> None:
+    release = threading.Event()
+
+    class SlowRescueApp(_WeakThenRescuedApp):
+        def explain(self, query: str, top_k: int = 3):
+            if query.startswith("exact evidence for"):
+                release.wait(timeout=1)
+            return super().explain(query, top_k=top_k)
+
+    try:
+        payload = _build_workflow_payload(
+            SlowRescueApp(),
+            query="what onboarding items are required",
+            object_query="onboarding required",
+            object_type="section",
+            top_k=3,
+            page_limit=3,
+            object_limit=5,
+            rescue_query_limit=1,
+            rescue_timeout_seconds=0.001,
+        )
+    finally:
+        release.set()
+
+    rescue = payload["steps"]["query_corpus"]["evidence_rescue"]
+    assert rescue["timed_out"] is True
+    assert rescue["attempts"] == []
+    assert rescue["improved"] is False
+    _print_rescue_summary(rescue)
+    assert "timed out after 0 completed alternate queries" in capsys.readouterr().out
 
 
 def test_build_workflow_payload_rescues_poor_quality_evidence() -> None:

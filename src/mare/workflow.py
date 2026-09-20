@@ -369,6 +369,8 @@ def _build_evidence_rescue(
             "reason": "Evidence rescue is disabled because the rescue query limit is zero.",
             "strategy": "parallel_multi_query",
             "query_limit": query_limit,
+            "timeout_seconds": timeout_seconds,
+            "timed_out": False,
             "elapsed_ms": 0.0,
             "queries": [],
             "attempts": [],
@@ -853,10 +855,15 @@ def _print_rescue_summary(evidence_rescue: dict[str, Any]) -> None:
         support = evidence_rescue.get("support") or {}
         label = support.get("label") or "stronger support"
         print(f"Evidence rescue: improved via \"{evidence_rescue.get('best_query')}\" ({label})")
+        if evidence_rescue.get("timed_out"):
+            print("Evidence rescue: some alternate queries timed out.")
+        return
+    if evidence_rescue.get("timed_out"):
+        print(f"Evidence rescue: timed out after {len(evidence_rescue.get('attempts') or [])} completed alternate queries; no stronger support found.")
         return
     queries = evidence_rescue.get("queries") or []
     if queries:
-        print(f"Evidence rescue: tried {len(queries)} alternate queries; no stronger support found.")
+        print(f"Evidence rescue: tried {len(evidence_rescue.get('attempts') or [])} alternate queries; no stronger support found.")
 
 
 def _default_history_slug(app: MAREApp) -> str:
