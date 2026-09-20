@@ -18,6 +18,7 @@ from mare.types import RetrievalFilters
 _PUBLIC_BASE_URL = ""
 _MEDIA_PATH = "/media"
 _RESTRICT_LOCAL_PATHS = False
+_ALLOW_REMOTE_URL_FETCH = False
 _DOWNLOAD_TIMEOUT_SECONDS = 20
 _MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 
@@ -84,6 +85,11 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def _download_pdf_url(pdf_url: str, download_path: str | None = None) -> Path:
+    if _RESTRICT_LOCAL_PATHS and not _ALLOW_REMOTE_URL_FETCH:
+        raise ValueError(
+            "URL ingestion is disabled on HTTP/SSE MCP because DNS can change between validation and connection. "
+            "Use stdio MCP or --allow-remote-url-fetch only behind a trusted, authenticated proxy."
+        )
     parsed = _validate_public_http_url(pdf_url)
 
     if download_path:
@@ -129,7 +135,7 @@ def _asset_url(path: str) -> str:
         return ""
     asset_path = Path(path)
     try:
-        relative = asset_path.resolve().relative_to(Path.cwd().resolve())
+        relative = asset_path.resolve().relative_to((Path.cwd() / "generated").resolve())
     except ValueError:
         return ""
     quoted = urllib.parse.quote(relative.as_posix())
@@ -406,11 +412,11 @@ def create_mcp_server():
     async def media_asset(request):
         asset_path = request.path_params.get("asset_path", "")
         requested = (asset_path or "").lstrip("/")
-        candidate = (Path.cwd() / requested).resolve()
-        cwd = Path.cwd().resolve()
-        if not candidate.is_relative_to(cwd):
+        root = (Path.cwd() / "generated").resolve()
+        candidate = (root / requested).resolve()
+        if not candidate.is_relative_to(root):
             return PlainTextResponse("Forbidden", status_code=403)
-        if not candidate.is_file():
+        if not candidate.is_file() or candidate.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
             return PlainTextResponse("Not Found", status_code=404)
         return FileResponse(candidate)
 
@@ -574,6 +580,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Transport to serve. Default: stdio. Use http for a remote MCP endpoint.",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host for HTTP/SSE transports")
+    parser.add_argument(
+        "--allow-unauthenticated-remote",
+        action="store_true",
+        help="Explicitly allow non-loopback HTTP/SSE binding without application authentication. Use only behind an authenticated proxy.",
+    )
+    parser.add_argument(
+        "--allow-remote-url-fetch",
+        action="store_true",
+        help="Opt in to URL ingestion on HTTP/SSE; DNS rebinding remains possible. Use only behind a trusted proxy.",
+    )
     parser.add_argument("--port", type=int, default=8000, help="Bind port for HTTP/SSE transports")
     parser.add_argument(
         "--path",
@@ -626,8 +642,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    global _PUBLIC_BASE_URL, _MEDIA_PATH, _RESTRICT_LOCAL_PATHS
+    global _PUBLIC_BASE_URL, _MEDIA_PATH, _RESTRICT_LOCAL_PATHS, _ALLOW_REMOTE_URL_FETCH
     args = build_arg_parser().parse_args(argv)
+    if args.transport != "stdio" and args.host not in {"127.0.0.1", "::1", "localhost"} and not args.allow_unauthenticated_remote:
+        raise SystemExit(
+            "Remote MCP binding requires --allow-unauthenticated-remote and an authenticated reverse proxy. "
+            "MARE does not provide built-in HTTP authentication."
+        )
     _PUBLIC_BASE_URL = _normalize_public_base_url(args.public_base_url)
     _MEDIA_PATH = _normalize_media_path(args.media_path)
     if args.transport == "stdio" and sys.stdin.isatty() and sys.stdout.isatty():
@@ -635,7 +656,8 @@ def main(argv: list[str] | None = None) -> None:
             "mare-mcp defaults to stdio, which is meant to be launched by an MCP-capable client rather than run "
             "interactively in a shell.\n\n"
             "For a human-facing local evaluation flow, use `mare-workflow` or `mare-ui`.\n"
-            "For a remote MCP endpoint, run `mare-mcp --transport http --host 0.0.0.0 --port 8000`.\n"
+            "For a remote MCP endpoint behind an authenticated proxy, run `mare-mcp --transport http "
+            "--host 0.0.0.0 --port 8000 --allow-unauthenticated-remote`.\n"
             "For local MCP clients, use the example config in examples/mcp_stdio_config.json."
         )
     server = create_mcp_server()
@@ -650,6 +672,7 @@ def main(argv: list[str] | None = None) -> None:
 
     transport = args.transport
     _RESTRICT_LOCAL_PATHS = transport != "stdio"
+    _ALLOW_REMOTE_URL_FETCH = args.allow_remote_url_fetch
     show_banner = not args.no_banner
     settings = getattr(server, "settings", None)
     if settings is not None:

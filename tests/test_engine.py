@@ -62,6 +62,23 @@ def test_retrieval_filters_limit_documents_pages_and_metadata() -> None:
     assert {hit.doc_id for hit in hits} == {"2"}
 
 
+def test_builtin_retrieval_filters_pages_before_scoring(monkeypatch) -> None:
+    docs = _docs()
+    engine = MAREngine(docs)
+    from mare.retrievers.text import TextRetriever
+
+    original = TextRetriever.retrieve
+    seen = []
+
+    def track(self, query, top_k=5):
+        seen.append([document.doc_id for document in self.documents])
+        return original(self, query, top_k)
+
+    monkeypatch.setattr(TextRetriever, "retrieve", track)
+    engine.retrieve("retrieval benchmark", filters=RetrievalFilters(document_ids=("2",)))
+    assert seen == [["2"]]
+
+
 def test_retrieval_filters_support_object_types() -> None:
     docs = [
         Document(

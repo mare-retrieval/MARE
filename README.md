@@ -148,7 +148,7 @@ MARE can return:
 - Evidence Brief with source coverage, support strength, conflict hints, proof assets, gaps, and next questions
 - deterministic research plans that tell agents when to answer, retrieve stronger support, compare sources, or resolve conflicts
 - agent contracts with a recommended action, answer/stop signal, and stop reasons for tool-using agents
-- evidence rescue in `mare workflow` and `mare chat`: when initial support is weak, missing, or missing core proof, MARE tries alternate evidence-seeking queries and records whether stronger proof was found
+- evidence rescue in `mare workflow` and `mare chat`: when initial support is weak, missing, or missing core proof, MARE tries up to two alternate queries, waits at most five seconds for them, and records whether stronger proof was found; already-running retrieval threads may finish in the background
 - structured payloads for agents, tools, and applications
 
 ## Supported Documents

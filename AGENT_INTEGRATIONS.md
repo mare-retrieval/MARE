@@ -66,6 +66,8 @@ Start MARE:
 mare mcp
 ```
 
+The default stdio transport is local. For HTTP/SSE, MARE has no built-in authentication: non-loopback binding requires `--allow-unauthenticated-remote` and an authenticated reverse proxy. URL ingestion is disabled on HTTP/SSE by default; `--allow-remote-url-fetch` opts into a DNS-rebinding risk and should only be used in a trusted deployment.
+
 Typical MCP-style tools include:
 
 - `ingest_document`

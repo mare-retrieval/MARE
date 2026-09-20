@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mare.mcp_server import (
+    _download_pdf_url,
     _asset_url,
     _attach_remote_asset_urls,
     _normalize_media_path,
@@ -22,6 +25,18 @@ from mare.mcp_server import (
     query_pdf_url_tool,
     search_objects_tool,
 )
+
+
+def test_remote_url_fetch_requires_explicit_opt_in(monkeypatch) -> None:
+    monkeypatch.setattr("mare.mcp_server._RESTRICT_LOCAL_PATHS", True)
+    monkeypatch.setattr("mare.mcp_server._ALLOW_REMOTE_URL_FETCH", False)
+    with pytest.raises(ValueError, match="URL ingestion is disabled"):
+        _download_pdf_url("https://example.com/manual.pdf")
+
+
+def test_nonloopback_http_requires_explicit_opt_in() -> None:
+    with pytest.raises(SystemExit, match="authenticated reverse proxy"):
+        main(["--transport", "http", "--host", "0.0.0.0"])
 from mare.types import Document, DocumentObject, Modality, ObjectType, RetrievalHit
 
 
@@ -200,13 +215,13 @@ def test_attach_remote_asset_urls_adds_public_urls(monkeypatch) -> None:
 
     updated = _attach_remote_asset_urls(payload)
 
-    assert updated["results"][0]["page_image_url"].endswith("/media/generated/manual/page-10.png")
-    assert updated["results"][0]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
-    assert updated["proof_assets"][0]["page_image_url"].endswith("/media/generated/manual/page-10.png")
-    assert updated["primary_proof_asset"]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
-    assert updated["best_evidence"]["page_image_url"].endswith("/media/generated/manual/page-10.png")
-    assert updated["proof_links"]["page_image_url"].endswith("/media/generated/manual/page-10.png")
-    assert updated["proof_links"]["highlight_image_url"].endswith("/media/generated/manual/highlight-10.png")
+    assert updated["results"][0]["page_image_url"].endswith("/media/manual/page-10.png")
+    assert updated["results"][0]["highlight_image_url"].endswith("/media/manual/highlight-10.png")
+    assert updated["proof_assets"][0]["page_image_url"].endswith("/media/manual/page-10.png")
+    assert updated["primary_proof_asset"]["highlight_image_url"].endswith("/media/manual/highlight-10.png")
+    assert updated["best_evidence"]["page_image_url"].endswith("/media/manual/page-10.png")
+    assert updated["proof_links"]["page_image_url"].endswith("/media/manual/page-10.png")
+    assert updated["proof_links"]["highlight_image_url"].endswith("/media/manual/highlight-10.png")
 
 
 def test_asset_url_returns_empty_without_public_base(monkeypatch) -> None:
@@ -419,7 +434,7 @@ def test_main_runs_http_transport_with_expected_defaults(monkeypatch) -> None:
     monkeypatch.setattr("sys.stdout", _TTY())
     monkeypatch.setattr("mare.mcp_server.create_mcp_server", lambda: fake_server)
 
-    main(["--transport", "http", "--host", "0.0.0.0", "--port", "9000"])
+    main(["--transport", "http", "--host", "0.0.0.0", "--port", "9000", "--allow-unauthenticated-remote"])
 
     assert fake_server.calls == [
         {

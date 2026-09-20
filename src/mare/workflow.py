@@ -343,6 +343,7 @@ def _build_evidence_rescue(
     baseline_support: dict[str, Any],
     top_k: int,
     query_limit: int = 2,
+    timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     baseline_quality = evidence_brief.get("evidence_quality") or {}
     support_needs_rescue = baseline_support.get("status") in {"weak", "none"}
@@ -382,9 +383,17 @@ def _build_evidence_rescue(
     best_results: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
     started_at = time.perf_counter()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(queries))) as executor:
-        explanations = list(executor.map(lambda item: app.explain(item, top_k=top_k), queries))
-    for rescue_query, explanation in zip(queries, explanations):
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(queries)))
+    try:
+        futures = {executor.submit(app.explain, item, top_k=top_k): item for item in queries}
+        done, pending = concurrent.futures.wait(futures, timeout=max(0.0, timeout_seconds))
+        explanations = [(futures[future], future.result()) for future in futures if future in done]
+        for future in pending:
+            future.cancel()
+    finally:
+        # Python cannot interrupt already-running synchronous retrieval threads.
+        executor.shutdown(wait=False, cancel_futures=True)
+    for rescue_query, explanation in explanations:
         support = _build_support_assessment(explanation)
         results = [_serialize_hit(hit) for hit in explanation.fused_results]
         candidate_brief = build_evidence_brief_payload(query, results, support=support)
@@ -422,6 +431,8 @@ def _build_evidence_rescue(
         "attempted": True,
         "strategy": "parallel_multi_query",
         "query_limit": query_limit,
+        "timeout_seconds": timeout_seconds,
+        "timed_out": bool(pending),
         "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 3),
         "improved": bool(best_query),
         "reason": reason,
@@ -491,6 +502,7 @@ def _build_workflow_payload(
     page_limit: int,
     object_limit: int,
     rescue_query_limit: int = 2,
+    rescue_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     summary = app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
     browsed_objects = app.search_objects(query=object_query, object_type=object_type, limit=object_limit)
@@ -505,6 +517,7 @@ def _build_workflow_payload(
         baseline_support=support,
         top_k=top_k,
         query_limit=rescue_query_limit,
+        timeout_seconds=rescue_timeout_seconds,
     )
     retrieval_query = query
     if evidence_rescue.get("improved"):
@@ -927,6 +940,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="0-8",
         help="Maximum alternate queries to run in parallel when evidence is weak. Use 0 to disable rescue.",
     )
+    parser.add_argument(
+        "--rescue-timeout-seconds",
+        type=float,
+        default=5.0,
+        help="Maximum time to wait for alternate retrieval queries. Running threads cannot be forcibly stopped.",
+    )
     parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
@@ -1002,6 +1021,7 @@ def main() -> None:
             page_limit=args.page_limit,
             object_limit=args.object_limit,
             rescue_query_limit=args.rescue_query_limit,
+            rescue_timeout_seconds=args.rescue_timeout_seconds,
         )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
