@@ -79,6 +79,8 @@ Typical MCP-style tools include:
 
 Prefer MCP when you want structured tool calls instead of shell parsing.
 
+For compound requests, set `decomposition_query_limit` (normally `2` or `3`) on MCP query tools. Read `query_decomposition.uncovered_queries` before answering; the returned `agent_contract` stops the agent when any detected facet lacks sufficient support.
+
 ## Option 3: Python Tool Wrapper
 
 Use this when building a custom agent runtime.

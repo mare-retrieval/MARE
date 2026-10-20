@@ -515,7 +515,7 @@ def test_chat_rescue_budget_can_disable_alternate_queries() -> None:
     assert rescue["timeout_seconds"] == 0.25
 
 
-def test_run_chat_forwards_rescue_budget(monkeypatch) -> None:
+def test_run_chat_forwards_retrieval_budgets(monkeypatch) -> None:
     captured = []
     answers = iter(["question", ":quit"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -525,9 +525,17 @@ def test_run_chat_forwards_rescue_budget(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr("mare.chat._build_chat_payload", fake_payload)
-    run_chat(_FakeApp(), rescue_query_limit=0, rescue_timeout_seconds=0.25)
+    run_chat(
+        _FakeApp(),
+        rescue_query_limit=0,
+        rescue_timeout_seconds=0.25,
+        decomposition_query_limit=3,
+        decomposition_timeout_seconds=0.5,
+    )
     assert captured[0]["rescue_query_limit"] == 0
     assert captured[0]["rescue_timeout_seconds"] == 0.25
+    assert captured[0]["decomposition_query_limit"] == 3
+    assert captured[0]["decomposition_timeout_seconds"] == 0.5
 
 
 def test_run_chat_saves_and_shows_session_history(monkeypatch, capsys, tmp_path: Path) -> None:

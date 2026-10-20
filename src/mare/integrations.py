@@ -285,6 +285,7 @@ def build_evidence_brief_payload(
     results: list[dict[str, Any]],
     *,
     support: dict[str, Any] | None = None,
+    query_decomposition: dict[str, Any] | None = None,
     limit: int = 3,
 ) -> dict[str, Any]:
     """Build a deterministic trust brief for humans and agent clients."""
@@ -311,7 +312,17 @@ def build_evidence_brief_payload(
         if value
     ]
     gaps = _evidence_gaps(results, resolved_support, unique_sources, conflict_hints=conflict_hints)
+    resolved_decomposition = query_decomposition or {}
+    if resolved_decomposition.get("attempted") and resolved_decomposition.get("coverage_rate", 1.0) < 1.0:
+        uncovered = resolved_decomposition.get("uncovered_queries") or []
+        gaps.insert(0, f"Compound query has unsupported facets: {', '.join(uncovered)}.")
     next_questions = _next_evidence_questions(query=query, results=results, gaps=gaps, limit=limit)
+    if resolved_decomposition.get("uncovered_queries"):
+        facet_questions = [
+            f"Find sufficient evidence for: {facet}."
+            for facet in resolved_decomposition["uncovered_queries"]
+        ]
+        next_questions = (facet_questions + next_questions)[:limit]
     research_plan = _build_research_plan(
         query=query,
         results=results,
@@ -320,6 +331,7 @@ def build_evidence_brief_payload(
         gaps=gaps,
         next_questions=next_questions,
         conflict_hints=conflict_hints,
+        query_decomposition=resolved_decomposition,
         limit=limit,
     )
 
@@ -336,6 +348,7 @@ def build_evidence_brief_payload(
         "evidence_gaps": gaps,
         "next_questions": next_questions,
         "research_plan": research_plan,
+        "query_decomposition": resolved_decomposition,
     }
 
 
@@ -710,14 +723,19 @@ def _build_research_plan(
     gaps: list[str],
     next_questions: list[str],
     conflict_hints: list[dict[str, Any]],
+    query_decomposition: dict[str, Any] | None,
     limit: int,
 ) -> dict[str, Any]:
     """Build deterministic next retrieval moves for agentic document workflows."""
     support_status = str(support.get("status") or "unknown")
     source_status = str(source_diversity.get("status") or "unknown")
+    uncovered_facets = (query_decomposition or {}).get("uncovered_queries") or []
     if not results:
         status = "needs_evidence"
         rationale = "No grounded evidence was retrieved, so the next step is source discovery."
+    elif uncovered_facets:
+        status = "needs_facet_coverage"
+        rationale = "At least one compound-query facet lacks sufficient support, so retrieve it before answering."
     elif support_status in {"weak", "none"}:
         status = "needs_stronger_support"
         rationale = "Initial support is weak, so alternate evidence-seeking queries should run before answering."
@@ -749,6 +767,14 @@ def _build_research_plan(
             }
         )
     else:
+        for facet in uncovered_facets:
+            steps.append(
+                {
+                    "action": "retrieve_missing_facet",
+                    "query": facet,
+                    "reason": "This compound-query facet lacks sufficient grounded support.",
+                }
+            )
         if support_status in {"weak", "none"}:
             steps.append(
                 {
@@ -968,6 +994,7 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
     research_status = str(research_plan.get("status") or "unknown")
     conflict_hints = evidence_brief.get("conflict_hints") or []
     gaps = evidence_brief.get("evidence_gaps") or []
+    query_decomposition = evidence_brief.get("query_decomposition") or {}
 
     stop_reasons: list[str] = []
     if support_status in {"weak", "none"}:
@@ -978,11 +1005,15 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
         stop_reasons.append("conflict_hints_present")
     if research_status in {"needs_evidence", "needs_stronger_support", "needs_conflict_check"}:
         stop_reasons.append(research_status)
+    if query_decomposition.get("attempted") and query_decomposition.get("coverage_rate", 1.0) < 1.0:
+        stop_reasons.append("compound_query_not_fully_supported")
 
     if research_status == "needs_evidence":
         recommended_action = "discover_sources"
     elif support_status in {"weak", "none"}:
         recommended_action = "retrieve_stronger_support"
+    elif query_decomposition.get("attempted") and query_decomposition.get("coverage_rate", 1.0) < 1.0:
+        recommended_action = "retrieve_missing_facets"
     elif evidence_quality_status == "poor":
         recommended_action = "inspect_evidence"
     elif conflict_hints:
@@ -1006,12 +1037,17 @@ def build_agent_contract_payload(evidence_brief: dict[str, Any]) -> dict[str, An
     }
 
 
-def hits_to_evidence_payload(query: str, hits: list[RetrievalHit]) -> dict[str, Any]:
+def hits_to_evidence_payload(
+    query: str,
+    hits: list[RetrievalHit],
+    *,
+    query_decomposition: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     results = [_serialize_hit(hit) for hit in hits]
     comparison = _build_comparison_payload(results)
     summary = build_grounded_summary_payload(results)
     findings = build_all_grounded_findings_payload(results)
-    evidence_brief = build_evidence_brief_payload(query, results)
+    evidence_brief = build_evidence_brief_payload(query, results, query_decomposition=query_decomposition)
     agent_contract = build_agent_contract_payload(evidence_brief)
     return {
         "query": query,

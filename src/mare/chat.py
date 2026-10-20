@@ -10,7 +10,13 @@ from mare.api import MAREApp
 from mare.extensions import MAREConfig, SUPPORTED_RETRIEVER_STACKS, config_for_retriever_stack
 from mare.integrations import format_evidence_citation
 from mare.types import RetrievalFilters
-from mare.workflow import _build_workflow_payload, _load_app, _parse_metadata_filters, _print_rescue_summary
+from mare.workflow import (
+    _build_workflow_payload,
+    _load_app,
+    _parse_metadata_filters,
+    _print_query_decomposition,
+    _print_rescue_summary,
+)
 
 
 _SKIP_DIR_NAMES = {
@@ -413,6 +419,7 @@ def _print_review(payload: dict) -> None:
     if research_plan.get("status"):
         print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
         print(f"Next question {index}: {item}")
     finding_counts = review.get("finding_counts", {})
@@ -434,6 +441,7 @@ def _print_evidence_brief(payload: dict) -> None:
     if support.get("message"):
         print(f"Support note: {support['message']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     sources = evidence_brief.get("source_documents") or []
     print(f"Sources: {', '.join(sources) if sources else '[none]'}")
     source_diversity = evidence_brief.get("source_diversity") or {}
@@ -540,6 +548,7 @@ def _print_answer(payload: dict) -> None:
     if research_plan.get("status"):
         print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
         print(f"Evidence gaps: {gaps[0]}")
@@ -563,6 +572,8 @@ def _build_chat_payload(
     object_limit: int,
     rescue_query_limit: int = 2,
     rescue_timeout_seconds: float = 5.0,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
 ) -> dict | None:
     try:
         return _build_workflow_payload(
@@ -575,6 +586,8 @@ def _build_chat_payload(
             object_limit=object_limit,
             rescue_query_limit=rescue_query_limit,
             rescue_timeout_seconds=rescue_timeout_seconds,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
     except RuntimeError as exc:
         print(str(exc))
@@ -611,6 +624,8 @@ def run_chat(
     object_limit: int = 5,
     rescue_query_limit: int = 2,
     rescue_timeout_seconds: float = 5.0,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
     session_store: ChatSessionStore | None = None,
 ) -> None:
     _print_intro(app)
@@ -624,6 +639,8 @@ def run_chat(
             object_limit=object_limit,
             rescue_query_limit=rescue_query_limit,
             rescue_timeout_seconds=rescue_timeout_seconds,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
     while True:
@@ -834,6 +851,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="Maximum time to wait for alternate retrieval queries. Running threads cannot be forcibly stopped.",
     )
+    parser.add_argument(
+        "--decomposition-query-limit",
+        type=int,
+        choices=range(0, 9),
+        default=0,
+        metavar="0-8",
+        help="Retrieve explicit compound-question facets independently. Default: 0 (disabled).",
+    )
+    parser.add_argument(
+        "--decomposition-timeout-seconds",
+        type=float,
+        default=5.0,
+        help="Maximum time to wait for compound-question facet retrieval.",
+    )
     parser.add_argument("--filter-doc-id", action="append", default=[], help="Only retrieve from this document ID. Repeatable.")
     parser.add_argument("--filter-source", action="append", default=[], help="Only retrieve from this source path or filename. Repeatable.")
     parser.add_argument("--filter-page", action="append", type=int, default=[], help="Only retrieve from this page. Repeatable.")
@@ -880,6 +911,8 @@ def main() -> None:
         object_limit=args.object_limit,
         rescue_query_limit=args.rescue_query_limit,
         rescue_timeout_seconds=args.rescue_timeout_seconds,
+        decomposition_query_limit=args.decomposition_query_limit,
+        decomposition_timeout_seconds=args.decomposition_timeout_seconds,
         session_store=session_store,
     )
 

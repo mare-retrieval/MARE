@@ -92,6 +92,14 @@ mare chat --folder ./docs --filter-object-type table --filter-metadata status=fi
 
 The Python API and MCP query tools accept the same filter model through `RetrievalFilters` or a structured `filters` object.
 
+For an explicitly compound question, opt into bounded facet retrieval and coverage checking:
+
+```bash
+mare workflow --folder ./docs --query "What is required and how do I submit it?" --decomposition-query-limit 3
+```
+
+`mare chat` accepts the same flag. MCP query tools accept `decomposition_query_limit` and `decomposition_timeout_seconds`. MARE retrieves each detected facet independently, reports covered and unsupported facets, and prevents the agent contract from approving an answer when a facet lacks sufficient evidence.
+
 Ask for the compact agent action contract:
 
 ```bash
@@ -302,13 +310,12 @@ MARE is strongest today on text-bearing PDFs and local mixed-document folders. T
 
 Near-term priorities:
 
-- stronger hybrid retrieval defaults
-- tighter snippets and highlights
-- better source diversity and contradiction analysis
-- weak-support query rewriting
-- evidence evaluation for retrieval quality
-- stronger table/layout proof
-- clearer agent integration recipes
+- benchmark-driven hybrid and late-interaction reranking defaults
+- structure-aware parent/child chunks that preserve heading, table, and page provenance
+- sentence/claim-level citation precision and coverage evaluation
+- stronger table-cell, figure-region, and cross-document evidence chains
+- MCP output schemas, standards-aligned authorization, and long-running task support as Python SDK support matures
+- opt-in OpenTelemetry retrieval traces with privacy-safe defaults
 
 ## License
 

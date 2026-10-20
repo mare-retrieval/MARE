@@ -22,6 +22,7 @@ from mare.integrations import (
     build_grounded_summary_payload,
     format_evidence_citation,
 )
+from mare.query_analysis import decompose_query
 from mare.types import RetrievalFilters
 
 
@@ -320,6 +321,89 @@ def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: 
     return deduped
 
 
+def _build_query_decomposition(
+    app: MAREApp,
+    *,
+    query: str,
+    top_k: int,
+    query_limit: int = 0,
+    timeout_seconds: float = 5.0,
+    filters: RetrievalFilters | None = None,
+) -> dict[str, Any]:
+    facets = decompose_query(query, limit=max(0, query_limit))
+    if not facets:
+        return {
+            "attempted": False,
+            "strategy": "deterministic_parallel_facets",
+            "reason": "Query decomposition is disabled or the query is not explicitly compound.",
+            "queries": [],
+            "attempts": [],
+            "covered_queries": [],
+            "uncovered_queries": [],
+            "coverage_rate": 1.0,
+            "timeout_seconds": timeout_seconds,
+            "timed_out": False,
+            "elapsed_ms": 0.0,
+        }
+
+    started_at = time.perf_counter()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(facets))
+    try:
+        futures = {
+            executor.submit(app.explain, facet, top_k=top_k, **({"filters": filters} if filters else {})): facet
+            for facet in facets
+        }
+        done, pending = concurrent.futures.wait(futures, timeout=max(0.0, timeout_seconds))
+        for future in pending:
+            future.cancel()
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    attempts: list[dict[str, Any]] = []
+    completed: dict[str, dict[str, Any]] = {}
+    for future, facet in futures.items():
+        if future not in done:
+            continue
+        try:
+            explanation = future.result()
+        except Exception as exc:  # keep other facets usable when one retriever fails
+            completed[facet] = {
+                "query": facet,
+                "covered": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "support": {"status": "none", "label": "No support"},
+                "result_count": 0,
+                "results": [],
+            }
+            continue
+        support = _build_support_assessment(explanation)
+        results = [_serialize_hit(hit) for hit in explanation.fused_results]
+        completed[facet] = {
+            "query": facet,
+            "covered": support.get("status") in {"moderate", "strong"},
+            "support": support,
+            "result_count": len(results),
+            "results": results,
+        }
+
+    attempts = [completed[facet] for facet in facets if facet in completed]
+    covered_queries = [item["query"] for item in attempts if item["covered"]]
+    uncovered_queries = [facet for facet in facets if facet not in covered_queries]
+    return {
+        "attempted": True,
+        "strategy": "deterministic_parallel_facets",
+        "reason": "Compound query facets were retrieved independently and checked for sufficient support.",
+        "queries": facets,
+        "attempts": attempts,
+        "covered_queries": covered_queries,
+        "uncovered_queries": uncovered_queries,
+        "coverage_rate": round(len(covered_queries) / len(facets), 4),
+        "timeout_seconds": timeout_seconds,
+        "timed_out": bool(pending),
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 3),
+    }
+
+
 def _serialize_hit(hit) -> dict[str, Any]:
     provenance = build_evidence_provenance(hit)
     return {
@@ -516,13 +600,28 @@ def _build_workflow_payload(
     object_limit: int,
     rescue_query_limit: int = 2,
     rescue_timeout_seconds: float = 5.0,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     summary = app.describe_corpus(page_limit=page_limit, object_limit=object_limit)
     browsed_objects = app.search_objects(query=object_query, object_type=object_type, limit=object_limit)
     explanation = app.explain(query, top_k=top_k)
     support = _build_support_assessment(explanation)
     retrieval_results = [_serialize_hit(hit) for hit in explanation.fused_results]
-    evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
+    query_decomposition = _build_query_decomposition(
+        app,
+        query=query,
+        top_k=top_k,
+        query_limit=decomposition_query_limit,
+        timeout_seconds=decomposition_timeout_seconds,
+        filters=getattr(app, "default_filters", None),
+    )
+    evidence_brief = build_evidence_brief_payload(
+        query,
+        retrieval_results,
+        support=support,
+        query_decomposition=query_decomposition,
+    )
     evidence_rescue = _build_evidence_rescue(
         app,
         query=query,
@@ -537,7 +636,12 @@ def _build_workflow_payload(
         retrieval_query = str(evidence_rescue.get("best_query") or query)
         support = evidence_rescue.get("support") or support
         retrieval_results = evidence_rescue.get("results") or retrieval_results
-        evidence_brief = build_evidence_brief_payload(query, retrieval_results, support=support)
+        evidence_brief = build_evidence_brief_payload(
+            query,
+            retrieval_results,
+            support=support,
+            query_decomposition=query_decomposition,
+        )
     agent_contract = build_agent_contract_payload(evidence_brief)
     comparison = _build_comparison_view(retrieval_results)
     grounded_summary = build_grounded_summary_payload(retrieval_results)
@@ -592,6 +696,7 @@ def _build_workflow_payload(
                 "evidence_brief": evidence_brief,
                 "agent_contract": agent_contract,
                 "evidence_rescue": evidence_rescue,
+                "query_decomposition": query_decomposition,
                 "review": review,
                 "support": support,
             },
@@ -701,6 +806,7 @@ def _print_pretty(payload: dict[str, Any]) -> None:
     if research_plan.get("status"):
         print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(evidence_rescue)
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     gaps = evidence_brief.get("evidence_gaps") or []
     if gaps:
         print(f"Evidence gaps: {gaps[0]}")
@@ -771,6 +877,7 @@ def _print_review(payload: dict[str, Any]) -> None:
     if research_plan.get("status"):
         print(f"Research plan: {research_plan['status']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     for index, item in enumerate(evidence_brief.get("evidence_gaps") or [], start=1):
         print(f"Evidence gap {index}: {item}")
     for index, item in enumerate(evidence_brief.get("next_questions") or [], start=1):
@@ -803,6 +910,7 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     if support.get("message"):
         print(f"Support note: {support['message']}")
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
+    _print_query_decomposition(query_step.get("query_decomposition") or {})
     sources = evidence_brief.get("source_documents") or []
     print(f"Sources: {', '.join(sources) if sources else '[none]'}")
     source_diversity = evidence_brief.get("source_diversity") or {}
@@ -875,6 +983,18 @@ def _print_rescue_summary(evidence_rescue: dict[str, Any]) -> None:
     queries = evidence_rescue.get("queries") or []
     if queries:
         print(f"Evidence rescue: tried {len(evidence_rescue.get('attempts') or [])} alternate queries; no stronger support found.")
+
+
+def _print_query_decomposition(query_decomposition: dict[str, Any]) -> None:
+    if not query_decomposition.get("attempted"):
+        return
+    queries = query_decomposition.get("queries") or []
+    covered = query_decomposition.get("covered_queries") or []
+    print(f"Compound query coverage: {len(covered)}/{len(queries)} facets sufficiently supported.")
+    for query in query_decomposition.get("uncovered_queries") or []:
+        print(f"Unsupported facet: {query}")
+    if query_decomposition.get("timed_out"):
+        print("Compound query retrieval: some facets timed out.")
 
 
 def _default_history_slug(app: MAREApp) -> str:
@@ -964,6 +1084,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="Maximum time to wait for alternate retrieval queries. Running threads cannot be forcibly stopped.",
     )
+    parser.add_argument(
+        "--decomposition-query-limit",
+        type=int,
+        choices=range(0, 9),
+        default=0,
+        metavar="0-8",
+        help="Retrieve explicit compound-question facets independently. Default: 0 (disabled).",
+    )
+    parser.add_argument(
+        "--decomposition-timeout-seconds",
+        type=float,
+        default=5.0,
+        help="Maximum time to wait for compound-question facet retrieval.",
+    )
     parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
@@ -1040,6 +1174,8 @@ def main() -> None:
             object_limit=args.object_limit,
             rescue_query_limit=args.rescue_query_limit,
             rescue_timeout_seconds=args.rescue_timeout_seconds,
+            decomposition_query_limit=args.decomposition_query_limit,
+            decomposition_timeout_seconds=args.decomposition_timeout_seconds,
         )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc

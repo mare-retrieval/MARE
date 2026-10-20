@@ -10,6 +10,7 @@ from mare.types import Modality, QueryPlan, RetrievalExplanation, RetrievalHit
 from mare.extensions import MAREConfig
 from mare.workflow import (
     _build_workflow_payload,
+    _build_query_decomposition,
     _default_output_path,
     _discover_folder_inputs,
     _load_app,
@@ -348,6 +349,55 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     assert query_step["evidence_rescue"]["attempts"][0]["top_citation"] == "employee-onboarding.docx | page 3"
     assert query_step["agent_contract"]["may_answer"] is True
     assert query_step["agent_contract"]["recommended_action"] == "answer_with_citations"
+
+
+def test_query_decomposition_reports_uncovered_facets() -> None:
+    class PartiallyCoveredApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            explanation = super().explain(query, top_k=top_k)
+            if query.lower().startswith("how"):
+                explanation.fused_results = []
+            return explanation
+
+    decomposition = _build_query_decomposition(
+        PartiallyCoveredApp(),
+        query="What is required and how do I submit it?",
+        top_k=2,
+        query_limit=3,
+    )
+
+    assert decomposition["attempted"] is True
+    assert decomposition["coverage_rate"] == 0.5
+    assert decomposition["covered_queries"] == ["What is required"]
+    assert decomposition["uncovered_queries"] == ["how do I submit it"]
+
+
+def test_workflow_contract_stops_on_unsupported_compound_facet() -> None:
+    class PartiallyCoveredApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            explanation = super().explain(query, top_k=top_k)
+            if query.lower().startswith("how"):
+                explanation.fused_results = []
+            return explanation
+
+    payload = _build_workflow_payload(
+        PartiallyCoveredApp(),
+        query="What is required and how do I submit it?",
+        object_query="required submit",
+        object_type=None,
+        top_k=2,
+        page_limit=3,
+        object_limit=5,
+        decomposition_query_limit=3,
+    )
+    query_step = payload["steps"]["query_corpus"]
+
+    assert query_step["query_decomposition"]["coverage_rate"] == 0.5
+    assert query_step["agent_contract"]["may_answer"] is False
+    assert query_step["agent_contract"]["recommended_action"] == "retrieve_missing_facets"
+    assert "compound_query_not_fully_supported" in query_step["agent_contract"]["stop_reasons"]
+    assert query_step["evidence_brief"]["research_plan"]["status"] == "needs_facet_coverage"
+    assert query_step["evidence_brief"]["research_plan"]["steps"][0]["action"] == "retrieve_missing_facet"
 
 
 def test_build_workflow_payload_can_disable_evidence_rescue() -> None:

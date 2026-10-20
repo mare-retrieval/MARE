@@ -191,6 +191,38 @@ def test_query_pdf_tool_returns_evidence_payload(monkeypatch) -> None:
     assert payload["agent_contract"]["recommended_action"] == "answer_with_citations"
 
 
+def test_query_pdf_tool_can_report_compound_query_coverage(monkeypatch) -> None:
+    from mare.types import QueryPlan, RetrievalExplanation
+
+    class CompoundFakeApp(_FakeApp):
+        def explain(self, query: str, top_k: int = 3):
+            hits = self.retrieve(query, top_k)
+            if query.lower().startswith("how"):
+                hits = []
+            return RetrievalExplanation(
+                plan=QueryPlan(
+                    query=query,
+                    selected_modalities=[Modality.TEXT],
+                    discarded_modalities=[],
+                    confidence=0.8,
+                    intent="semantic_lookup",
+                    rationale="test",
+                ),
+                per_modality_results={},
+                fused_results=hits,
+            )
+
+    monkeypatch.setattr("mare.mcp_server.load_pdf", lambda **kwargs: CompoundFakeApp())
+    payload = query_pdf_tool(
+        "manual.pdf",
+        "What is required and how do I submit it?",
+        decomposition_query_limit=3,
+    )
+
+    assert payload["query_decomposition"]["coverage_rate"] == 0.5
+    assert payload["agent_contract"]["recommended_action"] == "retrieve_missing_facets"
+
+
 def test_query_document_tool_returns_evidence_payload(monkeypatch) -> None:
     monkeypatch.setattr("mare.mcp_server.load_document", lambda **kwargs: _FakeApp())
 

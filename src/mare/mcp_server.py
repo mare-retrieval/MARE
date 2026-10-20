@@ -14,6 +14,7 @@ from typing import Any
 from mare.api import load_corpora, load_corpus, load_document, load_pdf
 from mare.integrations import hits_to_evidence_payload
 from mare.types import RetrievalFilters
+from mare.workflow import _build_query_decomposition
 
 _PUBLIC_BASE_URL = ""
 _MEDIA_PATH = "/media"
@@ -32,6 +33,35 @@ def _retrieve_with_filters(app, query: str, top_k: int, filters: dict[str, Any] 
     if resolved is None:
         return app.retrieve(query=query, top_k=top_k)
     return app.retrieve(query=query, top_k=top_k, filters=resolved)
+
+
+def _query_evidence_payload(
+    app,
+    *,
+    query: str,
+    top_k: int,
+    filters: dict[str, Any] | None,
+    decomposition_query_limit: int,
+    decomposition_timeout_seconds: float,
+) -> dict[str, Any]:
+    resolved_filters = _coerce_retrieval_filters(filters)
+    hits = (
+        app.retrieve(query=query, top_k=top_k, filters=resolved_filters)
+        if resolved_filters is not None
+        else app.retrieve(query=query, top_k=top_k)
+    )
+    decomposition = _build_query_decomposition(
+        app,
+        query=query,
+        top_k=top_k,
+        query_limit=decomposition_query_limit,
+        timeout_seconds=decomposition_timeout_seconds,
+        filters=resolved_filters,
+    )
+    payload = hits_to_evidence_payload(query=query, hits=hits, query_decomposition=decomposition)
+    payload["query_decomposition"] = decomposition
+    payload["filters"] = resolved_filters.as_dict() if resolved_filters else {}
+    return payload
 
 
 def _serialized_filters(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -237,14 +267,21 @@ def query_pdf_tool(
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     _require_allowed_local_path(pdf_path)
     if output_path:
         _require_allowed_local_path(output_path)
     app = load_pdf(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
-    hits = _retrieve_with_filters(app, query, top_k, filters)
-    payload = hits_to_evidence_payload(query=query, hits=hits)
-    payload["filters"] = _serialized_filters(filters)
+    payload = _query_evidence_payload(
+        app,
+        query=query,
+        top_k=top_k,
+        filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
+    )
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -264,14 +301,21 @@ def query_document_tool(
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     _require_allowed_local_path(document_path)
     if output_path:
         _require_allowed_local_path(output_path)
     app = load_document(source_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
-    hits = _retrieve_with_filters(app, query, top_k, filters)
-    payload = hits_to_evidence_payload(query=query, hits=hits)
-    payload["filters"] = _serialized_filters(filters)
+    payload = _query_evidence_payload(
+        app,
+        query=query,
+        top_k=top_k,
+        filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
+    )
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -310,6 +354,8 @@ def query_pdf_url_tool(
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     local_pdf = _download_pdf_url(pdf_url=pdf_url, download_path=download_path)
     payload = query_pdf_tool(
@@ -320,29 +366,55 @@ def query_pdf_url_tool(
         parser=parser,
         top_k=top_k,
         filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
     )
     payload.update({"pdf_url": pdf_url, "download_path": str(local_pdf)})
     return payload
 
 
-def query_corpus_tool(corpus_path: str, query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+def query_corpus_tool(
+    corpus_path: str,
+    query: str,
+    top_k: int = 3,
+    filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
     _require_allowed_local_path(corpus_path)
     app = load_corpus(corpus_path=corpus_path)
-    hits = _retrieve_with_filters(app, query, top_k, filters)
-    payload = hits_to_evidence_payload(query=query, hits=hits)
-    payload["filters"] = _serialized_filters(filters)
+    payload = _query_evidence_payload(
+        app,
+        query=query,
+        top_k=top_k,
+        filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
+    )
     _attach_remote_asset_urls(payload)
     payload.update({"corpus_path": str(corpus_path)})
     return payload
 
 
-def query_corpora_tool(corpus_paths: list[str], query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+def query_corpora_tool(
+    corpus_paths: list[str],
+    query: str,
+    top_k: int = 3,
+    filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
     for corpus_path in corpus_paths:
         _require_allowed_local_path(corpus_path)
     app = load_corpora(corpus_paths=corpus_paths)
-    hits = _retrieve_with_filters(app, query, top_k, filters)
-    payload = hits_to_evidence_payload(query=query, hits=hits)
-    payload["filters"] = _serialized_filters(filters)
+    payload = _query_evidence_payload(
+        app,
+        query=query,
+        top_k=top_k,
+        filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
+    )
     _attach_remote_asset_urls(payload)
     payload.update(
         {
@@ -451,6 +523,8 @@ def create_mcp_server():
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
     ) -> dict[str, Any]:
         """Query a PDF directly and return grounded evidence with page, snippet, highlight, and metadata."""
 
@@ -462,6 +536,8 @@ def create_mcp_server():
             parser=parser,
             top_k=top_k,
             filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
     @server.tool()
@@ -473,6 +549,8 @@ def create_mcp_server():
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
     ) -> dict[str, Any]:
         """Query a source document directly and return grounded evidence with snippet, proof metadata, and assets when available."""
 
@@ -484,6 +562,8 @@ def create_mcp_server():
             parser=parser,
             top_k=top_k,
             filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
     @server.tool()
@@ -514,6 +594,8 @@ def create_mcp_server():
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
     ) -> dict[str, Any]:
         """Download a PDF from an HTTP(S) URL, then return grounded evidence with page, snippet, highlight, and metadata."""
 
@@ -526,19 +608,49 @@ def create_mcp_server():
             parser=parser,
             top_k=top_k,
             filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
     @server.tool()
-    def query_corpus(corpus_path: str, query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    def query_corpus(
+        corpus_path: str,
+        query: str,
+        top_k: int = 3,
+        filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
+    ) -> dict[str, Any]:
         """Query an existing MARE corpus JSON and return grounded evidence results."""
 
-        return query_corpus_tool(corpus_path=corpus_path, query=query, top_k=top_k, filters=filters)
+        return query_corpus_tool(
+            corpus_path=corpus_path,
+            query=query,
+            top_k=top_k,
+            filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
+        )
 
     @server.tool()
-    def query_corpora(corpus_paths: list[str], query: str, top_k: int = 3, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    def query_corpora(
+        corpus_paths: list[str],
+        query: str,
+        top_k: int = 3,
+        filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
+    ) -> dict[str, Any]:
         """Query multiple MARE corpora together and return the best grounded evidence across PDFs."""
 
-        return query_corpora_tool(corpus_paths=corpus_paths, query=query, top_k=top_k, filters=filters)
+        return query_corpora_tool(
+            corpus_paths=corpus_paths,
+            query=query,
+            top_k=top_k,
+            filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
+        )
 
     @server.tool()
     def page_objects(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:
