@@ -44,6 +44,8 @@ def _print_folder_plan(folder: Path, files: list[Path]) -> None:
     print(f'     {DEFAULT_CHAT_QUERY}')
     print("  4. If you want the visual proof view and have UI deps installed")
     print("     mare ui")
+    print("  5. Give your coding agent (Claude Code, Cursor, VS Code, Codex) this evidence tool")
+    print("     mare connect claude-code")
     print("")
 
 
@@ -58,6 +60,8 @@ def _print_document_plan(document: Path) -> None:
         print(f'     mare workflow --document {_format_path(document)} --query "{DEFAULT_DOCUMENT_QUERY}" --task brief')
         print("  3. If you want the visual proof view and have UI deps installed")
         print("     mare ui")
+        print("  4. Give your coding agent (Claude Code, Cursor, VS Code, Codex) this evidence tool")
+        print("     mare connect claude-code")
     else:
         print("  1. Use workflow for a single non-PDF document with an Evidence Brief")
         print(f'     mare workflow --document {_format_path(document)} --query "{DEFAULT_DOCUMENT_QUERY}" --task brief')
@@ -78,6 +82,8 @@ def _print_demo_plan() -> None:
     print(f'     {DEFAULT_CHAT_QUERY}')
     print("  4. If you want the visual proof view and have UI deps installed")
     print("     mare ui")
+    print("  5. Give your coding agent (Claude Code, Cursor, VS Code, Codex) this evidence tool")
+    print("     mare connect claude-code")
     print("")
 
 

@@ -6,6 +6,13 @@ from mare.retrievers.base import BaseRetriever
 from mare.types import Modality, RetrievalHit
 
 
+def _page_preview(text: str, limit: int = 220) -> str:
+    normalized = re.sub(r"\s+", " ", text or "").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit].rstrip() + "..."
+
+
 def _shared_terms(query: str, field: str) -> set[str]:
     query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
     field_terms = set(re.findall(r"[a-z0-9]+", field.lower()))
@@ -69,7 +76,8 @@ class LayoutRetriever(BaseRetriever):
                     modality=self.modality,
                     score=score,
                     reason=" | ".join(reason_parts),
-                    snippet=document.layout_hints or document.metadata.get("signals", ""),
+                    # Layout labels describe the page; they are not evidence, so show page text.
+                    snippet=_page_preview(document.text) or document.layout_hints or document.metadata.get("signals", ""),
                     page_image_path=document.page_image_path,
                     highlight_image_path=document.page_image_path,
                     metadata=document.metadata,

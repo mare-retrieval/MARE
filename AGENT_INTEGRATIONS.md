@@ -60,16 +60,31 @@ Prefer quoting citation + snippet back to the user before taking external action
 
 Use this when your agent platform supports MCP.
 
-Start MARE:
+The quickest setup is `mare connect`. It prints config for your client with the absolute path to the
+`mare` executable, because desktop apps do not inherit your virtualenv's `PATH`. It also passes `--root`,
+so relative document paths resolve inside your project and indexes are written to `<project>/generated`:
 
 ```bash
-mare mcp
+pip install "mare-retrieval[mcp]"
+mare connect claude-code      # prints a `claude mcp add ...` command
+mare connect cursor --write   # merges into .cursor/mcp.json, keeping your other servers
+mare connect                  # every supported client
+```
+
+Supported clients: `claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`, `gemini`.
+MARE works with both the 1.x (`FastMCP`) and 2.x (`MCPServer`) MCP Python SDKs.
+
+To start the server by hand:
+
+```bash
+mare mcp --root /path/to/project
 ```
 
 The default stdio transport is local. For HTTP/SSE, MARE has no built-in authentication: non-loopback binding requires `--allow-unauthenticated-remote` and an authenticated reverse proxy. URL ingestion is disabled on HTTP/SSE by default; `--allow-remote-url-fetch` opts into a DNS-rebinding risk and should only be used in a trusted deployment.
 
 Typical MCP-style tools include:
 
+- `query_folder`: ask across every PDF, Markdown, text, and DOCX file in a folder (start here)
 - `ingest_document`
 - `query_document`
 - `ingest_pdf_url`
@@ -78,6 +93,14 @@ Typical MCP-style tools include:
 - `query_corpora`
 
 Prefer MCP when you want structured tool calls instead of shell parsing.
+
+Every tool declares MCP tool annotations. Corpus-only tools (`query_corpus`, `query_corpora`, `describe_corpus`,
+`page_objects`, `search_objects`) are marked `readOnlyHint`, so clients can auto-approve them. Tools that may
+build an index are not read-only. URL tools are marked `openWorldHint`. The server also sends instructions that
+tell agents to read `agent_contract` before answering.
+
+Documents are indexed on first use and re-indexed only when their content, parser, or MARE version changes,
+so repeated tool calls are fast and never answer from a stale index.
 
 For compound requests, set `decomposition_query_limit` (normally `2` or `3`) on MCP query tools. Read `query_decomposition.uncovered_queries` before answering; the returned `agent_contract` stops the agent when any detected facet lacks sufficient support.
 
@@ -89,7 +112,7 @@ Use this when building a custom agent runtime.
 from mare import load_document
 from mare.integrations import hits_to_evidence_payload
 
-app = load_document("docs/policy.md", reuse=True)
+app = load_document("docs/policy.md", reuse="auto")  # reuses the index until the file changes
 query = "what does onboarding require before completion?"
 hits = app.retrieve(query, top_k=3)
 payload = hits_to_evidence_payload(query, hits)
@@ -192,4 +215,5 @@ Avoid saying MARE is a native OpenClaw or Hermes plugin unless that plugin has a
 
 - OpenClaw: https://openclaw.ai/
 - Hermes Agent: https://github.com/NousResearch/hermes-agent
+- MARE MCP config for your client: `mare connect`
 - MARE MCP example config: `examples/mcp_stdio_config.json`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import hashlib
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import re
@@ -105,18 +106,26 @@ class MAREApp:
         cls,
         source_path: str | Path,
         output_path: str | Path | None = None,
-        reuse: bool = False,
+        reuse: bool | str = False,
         parser: str | DocumentParser | None = None,
         config: MAREConfig | None = None,
     ) -> "MAREApp":
+        """Load a document, reusing its generated corpus only while it is still fresh.
+
+        ``reuse`` may be ``False`` (always re-ingest), ``True`` or ``"auto"``. Both of
+        the latter reuse the existing corpus only when its fingerprint still matches the
+        source file, parser, and MARE version, so edited documents are never served
+        from a stale index.
+        """
         source_file = Path(source_path)
         corpus_path = Path(output_path) if output_path is not None else Path("generated") / f"{source_file.stem}.json"
         corpus_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_config = config or MAREConfig()
         parser_instance = _resolve_parser(source_file, parser or resolved_config.parser or "builtin")
 
-        if not reuse or not corpus_path.exists():
+        if not _can_reuse_corpus(reuse, source_file, corpus_path, parser_instance):
             parser_instance.ingest(source_file, corpus_path)
+            _write_fingerprint(source_file, corpus_path, parser_instance)
 
         documents = load_documents(corpus_path)
         return cls(
@@ -134,7 +143,7 @@ class MAREApp:
         cls,
         pdf_path: str | Path,
         output_path: str | Path | None = None,
-        reuse: bool = False,
+        reuse: bool | str = False,
         parser: str | DocumentParser | None = None,
         config: MAREConfig | None = None,
     ) -> "MAREApp":
@@ -315,6 +324,87 @@ class MAREApp:
         return paths
 
 
+_FINGERPRINT_SCHEMA = 1
+
+
+def fingerprint_path(corpus_path: str | Path) -> Path:
+    corpus = Path(corpus_path)
+    return corpus.with_name(f"{corpus.stem}.fingerprint.json")
+
+
+def _mare_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("mare-retrieval")
+    except Exception:
+        return "unknown"
+
+
+def _parser_name(parser: DocumentParser) -> str:
+    return str(getattr(parser, "name", "") or type(parser).__name__)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_identity(source_file: Path, parser: DocumentParser) -> dict[str, Any]:
+    stat = source_file.stat()
+    return {
+        "schema": _FINGERPRINT_SCHEMA,
+        "source": str(source_file.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "parser": _parser_name(parser),
+        "mare_version": _mare_version(),
+    }
+
+
+def _write_fingerprint(source_file: Path, corpus_path: Path, parser: DocumentParser) -> None:
+    try:
+        payload = _source_identity(source_file, parser)
+        payload["sha256"] = _sha256(source_file)
+        fingerprint_path(corpus_path).write_text(json.dumps(payload, indent=2))
+    except OSError:
+        # A missing fingerprint only costs a re-ingest next time.
+        pass
+
+
+def _can_reuse_corpus(reuse: bool | str, source_file: Path, corpus_path: Path, parser: DocumentParser) -> bool:
+    if not reuse or not corpus_path.exists():
+        return False
+    if not source_file.is_file():
+        # Nothing to re-ingest from; the existing corpus is the only copy of the evidence.
+        return True
+    try:
+        recorded = json.loads(fingerprint_path(corpus_path).read_text())
+        current = _source_identity(source_file, parser)
+    except (OSError, ValueError):
+        return False
+    stable_keys = ("schema", "source", "size", "parser", "mare_version")
+    if any(recorded.get(key) != current[key] for key in stable_keys):
+        return False
+    if recorded.get("mtime_ns") == current["mtime_ns"]:
+        return True
+    # Touched but maybe unchanged (copied, checked out): fall back to content hash.
+    try:
+        unchanged = recorded.get("sha256") == _sha256(source_file)
+    except OSError:
+        return False
+    if unchanged:
+        recorded["mtime_ns"] = current["mtime_ns"]
+        try:
+            fingerprint_path(corpus_path).write_text(json.dumps(recorded, indent=2))
+        except OSError:
+            pass
+    return unchanged
+
+
 def _resolve_parser(source_path: Path, parser: str | DocumentParser) -> DocumentParser:
     if not isinstance(parser, str):
         return parser
@@ -338,7 +428,7 @@ def load_corpora(corpus_paths: list[str | Path], config: MAREConfig | None = Non
 def load_pdf(
     pdf_path: str | Path,
     output_path: str | Path | None = None,
-    reuse: bool = False,
+    reuse: bool | str = False,
     parser: str | DocumentParser | None = None,
     config: MAREConfig | None = None,
 ) -> MAREApp:
@@ -354,7 +444,7 @@ def load_pdf(
 def load_document(
     source_path: str | Path,
     output_path: str | Path | None = None,
-    reuse: bool = False,
+    reuse: bool | str = False,
     parser: str | DocumentParser | None = None,
     config: MAREConfig | None = None,
 ) -> MAREApp:

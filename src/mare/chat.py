@@ -136,8 +136,16 @@ def _matches_patterns(path: Path, folder: Path, patterns: list[str]) -> bool:
 def _iter_folder_files(folder: Path, *, include: list[str] | None = None, exclude: list[str] | None = None):
     include_patterns = include or []
     exclude_patterns = exclude or []
+    # MARE's own output directory holds cached corpora for the very documents being
+    # discovered; loading both would double-count every piece of evidence. Only skip it
+    # when the user did not point --folder at (or inside) it on purpose.
+    output_root = (Path.cwd() / "generated").resolve()
+    resolved_folder = folder.resolve()
+    skip_output_root = not resolved_folder.is_relative_to(output_root)
     for path in folder.rglob("*"):
-        if any(part in _SKIP_DIR_NAMES for part in path.parts):
+        if any(part in _SKIP_DIR_NAMES for part in path.relative_to(folder).parts):
+            continue
+        if skip_output_root and path.resolve().is_relative_to(output_root):
             continue
         if not path.is_file():
             continue
@@ -192,7 +200,7 @@ def _build_app_from_args(
     corpora: list[str],
     include: list[str],
     exclude: list[str],
-    reuse: bool,
+    reuse: bool | str,
     parser: str,
     config: MAREConfig | None = None,
 ) -> MAREApp:
@@ -823,7 +831,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=[],
         help="Path to an existing MARE corpus JSON. Repeat to load multiple corpora.",
     )
-    parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
+    parser.add_argument(
+        "--reuse",
+        action="store_true",
+        help="Deprecated: generated corpora are now reused automatically while their source is unchanged",
+    )
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Ignore cached corpora and re-ingest every document",
+    )
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
         "--retriever",
@@ -885,7 +902,7 @@ def main() -> None:
         corpora=args.corpora,
         include=args.include,
         exclude=args.exclude,
-        reuse=args.reuse,
+        reuse=False if args.reindex else "auto",
         parser=args.parser,
         config=config_for_retriever_stack(args.retriever),
     )

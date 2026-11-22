@@ -291,18 +291,41 @@ def _rescue_improved(
     return candidate_score > baseline_score
 
 
+_RESCUE_FILLER_WORDS = {
+    "a", "about", "an", "and", "any", "are", "as", "at", "be", "by", "can", "could", "describe", "did", "do",
+    "does", "explain", "find", "for", "from", "give", "how", "i", "in", "is", "it", "know", "list", "me", "my",
+    "need", "of", "on", "or", "our", "please", "should", "show", "tell", "that", "the", "there", "these",
+    "this", "those", "to", "us", "we", "what", "when", "where", "which", "who", "why", "with", "would", "you",
+}
+
+
+def _rescue_keywords(value: str) -> list[str]:
+    tokens = [token.strip(".,;:!?\"'()[]{}").lower() for token in value.split()]
+    return [token for token in tokens if token and token not in _RESCUE_FILLER_WORDS]
+
+
 def _build_rescue_queries(query: str, evidence_brief: dict[str, Any], *, limit: int = 2) -> list[str]:
+    """Build alternate queries that stay on the user's topic.
+
+    Rescue queries never add generic words (such as "section" or "procedure") that would
+    inflate scores on unrelated pages. They either strip conversational filler from the
+    question or reuse follow-up questions that share the question's key terms.
+    """
     if limit <= 0:
         return []
     base_query = " ".join(query.split())
-    candidates = [
-        f"exact evidence for {base_query}",
-        f"section page requirement procedure for {base_query}",
-    ]
+    base_keywords = _rescue_keywords(base_query)
+    base_keyword_set = set(base_keywords)
+    candidates: list[str] = []
+    if base_keywords:
+        candidates.append(" ".join(base_keywords))
     for question in evidence_brief.get("next_questions") or []:
         normalized = str(question).strip()
         if normalized.lower().startswith("find stronger evidence for:"):
             normalized = normalized.split(":", 1)[1].strip()
+        if base_keyword_set and not base_keyword_set & set(_rescue_keywords(normalized)):
+            # Generic follow-ups ("What risks are supported?") drift off-topic.
+            continue
         candidates.append(normalized)
 
     deduped: list[str] = []
@@ -543,7 +566,7 @@ def _load_app(
     folder: str | None = None,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
-    reuse: bool = False,
+    reuse: bool | str = False,
     parser: str = "builtin",
     config: MAREConfig | None = None,
 ) -> MAREApp:
@@ -901,6 +924,25 @@ def _print_review(payload: dict[str, Any]) -> None:
     print("")
 
 
+def _quote(text: str, limit: int = 280) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
+
+
+def _print_quoted_evidence(results: list[dict[str, Any]], limit: int = 3) -> None:
+    """Show what the documents actually say, with citations, before the diagnostics."""
+    quoted = [item for item in results if item.get("snippet")][:limit]
+    if not quoted:
+        return
+    print("Evidence:")
+    for index, item in enumerate(quoted, start=1):
+        citation = item.get("citation") or f"{item.get('title') or 'document'} | page {item.get('page')}"
+        print(f"  [{index}] {citation}")
+        print(f'      "{_quote(item["snippet"])}"')
+
+
 def _print_evidence_brief(payload: dict[str, Any]) -> None:
     query_step = payload["steps"]["query_corpus"]
     evidence_brief = query_step.get("evidence_brief", {})
@@ -909,6 +951,7 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     print(evidence_brief.get("overview") or "No evidence brief available.")
     if support.get("message"):
         print(f"Support note: {support['message']}")
+    _print_quoted_evidence(query_step.get("results") or [])
     _print_rescue_summary(query_step.get("evidence_rescue") or {})
     _print_query_decomposition(query_step.get("query_decomposition") or {})
     sources = evidence_brief.get("source_documents") or []
@@ -919,8 +962,13 @@ def _print_evidence_brief(payload: dict[str, Any]) -> None:
     evidence_quality = evidence_brief.get("evidence_quality") or {}
     if evidence_quality.get("label"):
         print(f"Evidence quality: {evidence_quality['label']}")
-    for item in evidence_quality.get("checks") or []:
-        print(f"Quality check {item.get('name')}: {item.get('status')} - {item.get('message')}")
+    checks = evidence_quality.get("checks") or []
+    passed = sum(1 for item in checks if item.get("status") == "pass")
+    if checks:
+        print(f"Quality checks: {passed}/{len(checks)} pass")
+    for item in checks:
+        if item.get("status") != "pass":
+            print(f"Quality check {item.get('name')}: {item.get('status')} - {item.get('message')}")
     proof_assets = evidence_brief.get("available_proof_assets") or []
     print(f"Proof assets: {', '.join(proof_assets) if proof_assets else '[none]'}")
     agent_contract = query_step.get("agent_contract") or {}
@@ -1098,7 +1146,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="Maximum time to wait for compound-question facet retrieval.",
     )
-    parser.add_argument("--reuse", action="store_true", help="Reuse generated corpora for PDFs when available")
+    parser.add_argument(
+        "--reuse",
+        action="store_true",
+        help="Deprecated: generated corpora are now reused automatically while their source is unchanged",
+    )
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Ignore cached corpora and re-ingest every document",
+    )
     parser.add_argument("--parser", default="builtin", help="Parser to use for --pdf ingestion. Default: builtin")
     parser.add_argument(
         "--retriever",
@@ -1147,7 +1204,7 @@ def main() -> None:
         folder=args.folder,
         include=args.include,
         exclude=args.exclude,
-        reuse=args.reuse,
+        reuse=False if args.reindex else "auto",
         parser=args.parser,
         config=config_for_retriever_stack(args.retriever),
     )

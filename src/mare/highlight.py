@@ -172,8 +172,15 @@ def render_highlighted_page(
     if output_path.exists():
         return str(output_path)
 
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    page = pdf[page_number - 1]
+    if not Path(pdf_path).is_file():
+        # The corpus outlived its source PDF (moved, deleted, or a temp upload). Highlights
+        # are optional proof, so retrieval continues without one.
+        return ""
+    try:
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        page = pdf[page_number - 1]
+    except Exception:
+        return ""
     textpage = page.get_textpage()
     rects = _search_rectangles(textpage, query=query, snippet=snippet)
     if not rects:

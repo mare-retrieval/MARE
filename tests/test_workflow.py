@@ -100,7 +100,7 @@ class _FakeApp:
 
 class _WeakThenRescuedApp(_FakeApp):
     def explain(self, query: str, top_k: int = 3):
-        if query.startswith("exact evidence for"):
+        if not query.lower().startswith("what"):
             score = 0.91
             snippet = "The onboarding checklist requires completing payroll forms before system access."
             reason = "Matched exact evidence for onboarding checklist requirements."
@@ -138,7 +138,7 @@ class _WeakThenRescuedApp(_FakeApp):
 
 class _PoorQualityThenRescuedApp(_FakeApp):
     def explain(self, query: str, top_k: int = 3):
-        rescued = query.startswith("exact evidence for")
+        rescued = not query.lower().startswith("what")
         snippet = "The policy requires manager approval before access is granted." if rescued else ""
         highlight = "generated/policy/highlight-2.png" if rescued else ""
         reason = "Matched exact approval requirement." if rescued else "Matched policy wording."
@@ -336,15 +336,15 @@ def test_build_workflow_payload_rescues_weak_evidence() -> None:
     query_step = payload["steps"]["query_corpus"]
 
     assert query_step["support"]["status"] == "strong"
-    assert query_step["retrieval_query"] == "exact evidence for what onboarding items are required"
+    assert query_step["retrieval_query"] == "onboarding items required"
     assert query_step["results"][0]["snippet"] == "The onboarding checklist requires completing payroll forms before system access."
     assert query_step["evidence_rescue"]["attempted"] is True
     assert query_step["evidence_rescue"]["strategy"] == "parallel_multi_query"
     assert query_step["evidence_rescue"]["query_limit"] == 2
     assert query_step["evidence_rescue"]["elapsed_ms"] >= 0.0
     assert query_step["evidence_rescue"]["improved"] is True
-    assert query_step["evidence_rescue"]["best_query"] == "exact evidence for what onboarding items are required"
-    assert query_step["evidence_rescue"]["attempts"][0]["query"] == "exact evidence for what onboarding items are required"
+    assert query_step["evidence_rescue"]["best_query"] == "onboarding items required"
+    assert query_step["evidence_rescue"]["attempts"][0]["query"] == "onboarding items required"
     assert query_step["evidence_rescue"]["attempts"][0]["improved"] is True
     assert query_step["evidence_rescue"]["attempts"][0]["top_citation"] == "employee-onboarding.docx | page 3"
     assert query_step["agent_contract"]["may_answer"] is True
@@ -423,7 +423,7 @@ def test_evidence_rescue_timeout_reports_only_completed_attempts(capsys) -> None
 
     class SlowRescueApp(_WeakThenRescuedApp):
         def explain(self, query: str, top_k: int = 3):
-            if query.startswith("exact evidence for"):
+            if not query.lower().startswith("what"):
                 release.wait(timeout=1)
             return super().explain(query, top_k=top_k)
 
@@ -463,7 +463,7 @@ def test_build_workflow_payload_rescues_poor_quality_evidence() -> None:
     query_step = payload["steps"]["query_corpus"]
 
     assert query_step["support"]["status"] == "strong"
-    assert query_step["retrieval_query"] == "exact evidence for what approval is required"
+    assert query_step["retrieval_query"] == "approval required"
     assert query_step["results"][0]["snippet"] == "The policy requires manager approval before access is granted."
     assert query_step["evidence_brief"]["evidence_quality"]["status"] == "high"
     assert query_step["evidence_rescue"]["attempted"] is True
@@ -623,3 +623,24 @@ def test_workflow_history_store_uses_default_slug() -> None:
     history_store = build_history_store(_FakeApp())
 
     assert history_store.path == Path("generated/workflow_runs/manual-workflow.json")
+
+
+def test_rescue_queries_strip_filler_without_adding_generic_terms() -> None:
+    from mare.workflow import _build_rescue_queries
+
+    queries = _build_rescue_queries(
+        "Can you show me the onboarding steps?",
+        {
+            "next_questions": [
+                "Find stronger evidence for: Can you show me the onboarding steps?",
+                "What actions, requirements, risks, or deadlines are supported by this evidence?",
+                "Which onboarding forms are due first?",
+            ]
+        },
+        limit=3,
+    )
+
+    assert queries[0] == "onboarding steps"
+    assert "Which onboarding forms are due first?" in queries
+    assert all("procedure" not in item and "section" not in item for item in queries)
+    assert not any(item.startswith("What actions") for item in queries)
