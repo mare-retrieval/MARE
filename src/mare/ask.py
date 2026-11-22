@@ -35,7 +35,7 @@ def _print_answer_block(query: str, corpus_path: Path, explanation) -> None:
     print(f"Highlighted image: {best.highlight_image_path or '[no highlight available]'}")
 
 
-def ask_pdf(pdf_path: Path, query: str, top_k: int = 3, reuse: bool = False):
+def ask_pdf(pdf_path: Path, query: str, top_k: int = 3, reuse: bool | str = False):
     app = load_pdf(pdf_path=pdf_path, output_path=_default_output_path(pdf_path), reuse=reuse)
     explanation = app.explain(query, top_k=top_k)
     setattr(explanation, "app", app)
@@ -51,12 +51,17 @@ def main() -> None:
     parser.add_argument(
         "--reuse",
         action="store_true",
-        help="Reuse an existing generated corpus if present instead of re-ingesting",
+        help="Deprecated: generated corpora are now reused automatically while their source is unchanged",
+    )
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Ignore cached corpora and re-ingest every document",
     )
     args = parser.parse_args()
 
     pdf_path = Path(args.pdf)
-    output_path, explanation = ask_pdf(pdf_path=pdf_path, query=args.query, top_k=args.top_k, reuse=args.reuse)
+    output_path, explanation = ask_pdf(pdf_path=pdf_path, query=args.query, top_k=args.top_k, reuse=False if args.reindex else "auto")
     _print_answer_block(args.query, output_path, explanation)
 
 

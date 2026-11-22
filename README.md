@@ -30,20 +30,39 @@ Or:
 PYTHONPATH=src python3 examples/evidence_brief_demo.py
 ```
 
-Example output shape:
+Example output (`--query "what should I do if the charging light stays off"`):
 
 ```text
-Evidence brief query: show me the onboarding steps
-Weak support from 1 retrieved result across 1 source.
-Support note: Evidence is weak or ambiguous. Inspect the proof carefully or refine the question.
-Sources: employee-onboarding.docx
-Source coverage: Single-source coverage
-Proof assets: snippet, citation
-Evidence gap 1: Support is weak; ask a narrower question or increase top-k.
-Next question 1: Find stronger evidence for: show me the onboarding steps
+Evidence brief query: what should I do if the charging light stays off
+Strong support from 3 retrieved results across 3 sources.
+Support note: Grounded evidence looks strong for this answer.
+Evidence:
+  [1] device-manual.md | lines 6-8 | Basic troubleshooting
+      "## Basic troubleshooting - If the charging light stays off, reconnect the adapter firmly. ..."
+  [2] support-notes.txt | line 7 | Support notes
+      "3. Escalate only if the charging light still stays off."
+  [3] employee-onboarding.docx | line 4 | Employee onboarding
+      "3. Confirm the charging light is on."
+Sources: device-manual.md, support-notes.txt, employee-onboarding.docx
+Source coverage: Broad source coverage
+Evidence quality: High evidence quality
+Quality checks: 8/8 pass
+Agent action: answer_with_citations
 ```
 
-That is the core MARE difference: it shows proof, source coverage, support level, conflict signals when detected, gaps, and the next evidence-seeking move.
+That is the core MARE difference: it quotes the evidence and shows source coverage, support level, conflict signals when detected, gaps, and the next evidence-seeking move.
+
+## Connect Your Agent
+
+Give Claude Code, Cursor, VS Code, Codex, Gemini CLI, or Claude Desktop a grounded document-evidence tool:
+
+```bash
+pip install "mare-retrieval[mcp]"
+mare connect claude-code      # prints the `claude mcp add ...` command
+mare connect cursor --write   # merges MARE into .cursor/mcp.json
+```
+
+Then ask your agent: *"Use MARE to check what ./docs says about onboarding, with citations."* The `query_folder` tool searches every supported document in the folder and returns citations, quotes, support strength, and an `agent_contract` that says whether the agent may answer.
 
 ## Install
 
@@ -180,6 +199,7 @@ PDFs currently have the strongest visual proof because MARE can render pages and
 | `mare chat` | simple local document-agent loop | `:brief`, `:contract`, `:review`, `:compare`, `:summary`, findings, session history |
 | `mare ui` | visual exploration | uploads, Evidence Briefs, summaries, findings, highlights |
 | `mare mcp` | agent/app integrations | MCP tools returning structured evidence payloads |
+| `mare connect` | wiring MARE into an agent client | ready-to-paste MCP config for Claude Code, Cursor, VS Code, Codex, Gemini CLI, Claude Desktop |
 
 ## Agent Integrations
 
@@ -204,7 +224,7 @@ See [AGENT_INTEGRATIONS.md](./AGENT_INTEGRATIONS.md) for OpenClaw/Hermes recipes
 ```python
 from mare import load_document
 
-app = load_document("guide.md", reuse=True)
+app = load_document("guide.md", reuse="auto")  # re-indexes only when guide.md changes
 best = app.best_match("how do I connect the AC adapter")
 
 print(best.page)
@@ -244,9 +264,12 @@ Advanced optional paths include FastEmbed semantic retrieval and reranking, expe
 
 ## Generated Files
 
+Documents are indexed on first use and reused on later runs. Each index carries a fingerprint (source path, size, modification time, SHA-256, parser, and MARE version), so MARE re-indexes automatically when a document changes and never answers from a stale index. Use `--reindex` to force a rebuild. Folder discovery skips MARE's own `generated/` directory so cached indexes are not counted twice.
+
 MARE writes local artifacts under `generated/` by default:
 
 - corpus JSON: `generated/<document-name>.json`
+- index fingerprint: `generated/<document-name>.fingerprint.json`
 - rendered PDF pages: `generated/<document-name>/page-*.png`
 - highlighted proof images: `generated/<document-name>/highlights/*.png`
 - chat session history: `generated/chat_sessions/`
@@ -314,7 +337,7 @@ Near-term priorities:
 - structure-aware parent/child chunks that preserve heading, table, and page provenance
 - sentence/claim-level citation precision and coverage evaluation
 - stronger table-cell, figure-region, and cross-document evidence chains
-- MCP output schemas, standards-aligned authorization, and long-running task support as Python SDK support matures
+- MCP output schemas, standards-aligned authorization, and long-running task support (tool annotations, server instructions, and MCP Python SDK 2.x support have shipped)
 - opt-in OpenTelemetry retrieval traces with privacy-safe defaults
 
 ## License

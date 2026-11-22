@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import ipaddress
 import inspect
 import socket
@@ -222,7 +223,7 @@ def _attach_remote_asset_urls(payload: dict[str, Any]) -> dict[str, Any]:
 def ingest_pdf_tool(
     pdf_path: str,
     output_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
 ) -> dict[str, Any]:
     _require_allowed_local_path(pdf_path)
@@ -242,7 +243,7 @@ def ingest_pdf_tool(
 def ingest_document_tool(
     document_path: str,
     output_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
 ) -> dict[str, Any]:
     _require_allowed_local_path(document_path)
@@ -263,7 +264,7 @@ def query_pdf_tool(
     pdf_path: str,
     query: str,
     output_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
@@ -297,7 +298,7 @@ def query_document_tool(
     document_path: str,
     query: str,
     output_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
@@ -327,11 +328,57 @@ def query_document_tool(
     return payload
 
 
+def query_folder_tool(
+    folder_path: str,
+    query: str,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+    reuse: bool = True,
+    parser: str = "builtin",
+    top_k: int = 5,
+    filters: dict[str, Any] | None = None,
+    decomposition_query_limit: int = 0,
+    decomposition_timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
+    from mare.workflow import _load_app
+
+    folder = _require_allowed_local_path(folder_path)
+    if not folder.is_dir():
+        raise ValueError(f"folder_path is not a directory: {folder_path}")
+    app = _load_app(
+        documents=[],
+        corpora=[],
+        folder=str(folder),
+        include=include or [],
+        exclude=exclude or [],
+        reuse=reuse,
+        parser=parser,
+    )
+    payload = _query_evidence_payload(
+        app,
+        query=query,
+        top_k=top_k,
+        filters=filters,
+        decomposition_query_limit=decomposition_query_limit,
+        decomposition_timeout_seconds=decomposition_timeout_seconds,
+    )
+    _attach_remote_asset_urls(payload)
+    payload.update(
+        {
+            "folder_path": str(folder_path),
+            "documents": [str(path) for path in app.source_documents],
+            "corpus_paths": [str(path) for path in app.corpus_paths],
+            "parser": parser,
+        }
+    )
+    return payload
+
+
 def ingest_pdf_url_tool(
     pdf_url: str,
     output_path: str | None = None,
     download_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
 ) -> dict[str, Any]:
     local_pdf = _download_pdf_url(pdf_url=pdf_url, download_path=download_path)
@@ -350,7 +397,7 @@ def query_pdf_url_tool(
     query: str,
     output_path: str | None = None,
     download_path: str | None = None,
-    reuse: bool = False,
+    reuse: bool = True,
     parser: str = "builtin",
     top_k: int = 3,
     filters: dict[str, Any] | None = None,
@@ -468,9 +515,64 @@ def search_objects_tool(
     }
 
 
-def create_mcp_server():
+_SERVER_INSTRUCTIONS = (
+    "MARE returns grounded evidence from local documents: citations, exact snippets, page highlights, "
+    "support strength, evidence gaps, and an agent_contract. Start with query_folder for a directory of "
+    "documents, or query_document for one file. Read agent_contract before acting: when may_answer is "
+    "false, follow recommended_action instead of answering. Quote the citation and snippet when you answer."
+)
+
+
+def _import_server_class():
+    """Return the MCP server class for the installed SDK (2.x MCPServer or 1.x FastMCP)."""
+    try:
+        import mcp  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "MARE MCP support requires the `mcp` package. Install it with "
+            "`pip install 'mare-retrieval[mcp]'` or `pip install mcp`."
+        ) from exc
+    try:
+        from mcp.server.mcpserver import MCPServer
+
+        return MCPServer
+    except ImportError:
+        pass
     try:
         from mcp.server.fastmcp import FastMCP
+
+        return FastMCP
+    except ImportError as exc:
+        raise RuntimeError(
+            "The installed `mcp` package exposes neither MCPServer (2.x) nor FastMCP (1.x). "
+            "Upgrade it with `pip install -U 'mare-retrieval[mcp]'`."
+        ) from exc
+
+
+def _tool_options(server, *, title: str, read_only: bool = True, open_world: bool = False) -> dict[str, Any]:
+    """Tool annotations so clients can auto-approve safe reads and flag network access."""
+    try:
+        from mcp.types import ToolAnnotations
+    except ImportError:
+        return {}
+    parameters = inspect.signature(server.tool).parameters
+    options: dict[str, Any] = {}
+    if "annotations" in parameters:
+        options["annotations"] = ToolAnnotations(
+            title=title,
+            readOnlyHint=read_only,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=open_world,
+        )
+    if "title" in parameters:
+        options["title"] = title
+    return options
+
+
+def create_mcp_server():
+    server_class = _import_server_class()
+    try:
         from starlette.responses import FileResponse, PlainTextResponse
     except ImportError as exc:
         raise RuntimeError(
@@ -478,7 +580,11 @@ def create_mcp_server():
             "`pip install 'mare-retrieval[mcp]'` or `pip install mcp`."
         ) from exc
 
-    server = FastMCP("MARE")
+    server_parameters = inspect.signature(server_class.__init__).parameters
+    server_kwargs: dict[str, Any] = {}
+    if "instructions" in server_parameters:
+        server_kwargs["instructions"] = _SERVER_INSTRUCTIONS
+    server = server_class("MARE", **server_kwargs)
 
     @server.custom_route(f"{_MEDIA_PATH}/{{asset_path:path}}", methods=["GET"])
     async def media_asset(request):
@@ -492,34 +598,34 @@ def create_mcp_server():
             return PlainTextResponse("Not Found", status_code=404)
         return FileResponse(candidate)
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Index a PDF', read_only=False, open_world=False))
     def ingest_pdf(
         pdf_path: str,
         output_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
     ) -> dict[str, Any]:
         """Ingest a PDF into a MARE corpus and return the generated corpus path and summary."""
 
         return ingest_pdf_tool(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Index a document', read_only=False, open_world=False))
     def ingest_document(
         document_path: str,
         output_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
     ) -> dict[str, Any]:
         """Ingest a source document into a MARE corpus and return the generated corpus path and summary."""
 
         return ingest_document_tool(document_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Ask a PDF', read_only=False, open_world=False))
     def query_pdf(
         pdf_path: str,
         query: str,
         output_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
@@ -540,12 +646,45 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title="Ask a folder of documents", read_only=False, open_world=False))
+    def query_folder(
+        folder_path: str,
+        query: str,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        reuse: bool = True,
+        parser: str = "builtin",
+        top_k: int = 5,
+        filters: dict[str, Any] | None = None,
+        decomposition_query_limit: int = 0,
+        decomposition_timeout_seconds: float = 5.0,
+    ) -> dict[str, Any]:
+        """Ask a question across every supported document in a folder (PDF, Markdown, text, DOCX).
+
+        Documents are indexed on first use and re-indexed only when they change. Use include/exclude
+        glob patterns relative to the folder (for example "policies/*.pdf") to narrow the set.
+        Returns citations, snippets, support strength, evidence gaps, and an agent_contract.
+        """
+
+        return query_folder_tool(
+            folder_path=folder_path,
+            query=query,
+            include=include,
+            exclude=exclude,
+            reuse=reuse,
+            parser=parser,
+            top_k=top_k,
+            filters=filters,
+            decomposition_query_limit=decomposition_query_limit,
+            decomposition_timeout_seconds=decomposition_timeout_seconds,
+        )
+
+    @server.tool(**_tool_options(server, title='Ask a document', read_only=False, open_world=False))
     def query_document(
         document_path: str,
         query: str,
         output_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
@@ -566,12 +705,12 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Index a PDF from a URL', read_only=False, open_world=True))
     def ingest_pdf_url(
         pdf_url: str,
         output_path: str | None = None,
         download_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
     ) -> dict[str, Any]:
         """Download a PDF from an HTTP(S) URL, ingest it into a MARE corpus, and return the generated corpus path."""
@@ -584,13 +723,13 @@ def create_mcp_server():
             parser=parser,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Ask a PDF at a URL', read_only=False, open_world=True))
     def query_pdf_url(
         pdf_url: str,
         query: str,
         output_path: str | None = None,
         download_path: str | None = None,
-        reuse: bool = False,
+        reuse: bool = True,
         parser: str = "builtin",
         top_k: int = 3,
         filters: dict[str, Any] | None = None,
@@ -612,7 +751,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Ask an indexed corpus', read_only=True, open_world=False))
     def query_corpus(
         corpus_path: str,
         query: str,
@@ -632,7 +771,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Ask several indexed corpora', read_only=True, open_world=False))
     def query_corpora(
         corpus_paths: list[str],
         query: str,
@@ -652,19 +791,19 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='List page evidence objects', read_only=True, open_world=False))
     def page_objects(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:
         """List extracted document objects for a page/document entry inside a MARE corpus."""
 
         return page_objects_tool(corpus_path=corpus_path, doc_id=doc_id, limit=limit)
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Describe an indexed corpus', read_only=True, open_world=False))
     def describe_corpus(corpus_path: str, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
         """Summarize a MARE corpus so an agent can understand what pages, objects, and signals exist before querying."""
 
         return describe_corpus_tool(corpus_path=corpus_path, page_limit=page_limit, object_limit=object_limit)
 
-    @server.tool()
+    @server.tool(**_tool_options(server, title='Search evidence objects', read_only=True, open_world=False))
     def search_objects(
         corpus_path: str,
         query: str,
@@ -690,6 +829,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=("stdio", "http", "sse", "streamable-http"),
         default="stdio",
         help="Transport to serve. Default: stdio. Use http for a remote MCP endpoint.",
+    )
+    parser.add_argument(
+        "--root",
+        default="",
+        help=(
+            "Working directory for the server: relative document paths resolve here and indexes are written "
+            "to <root>/generated. Set this when a desktop MCP client launches servers from an arbitrary directory."
+        ),
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind host for HTTP/SSE transports")
     parser.add_argument(
@@ -756,6 +903,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     global _PUBLIC_BASE_URL, _MEDIA_PATH, _RESTRICT_LOCAL_PATHS, _ALLOW_REMOTE_URL_FETCH
     args = build_arg_parser().parse_args(argv)
+    if args.root:
+        root = Path(args.root).expanduser()
+        if not root.is_dir():
+            raise SystemExit(f"--root is not a directory: {args.root}")
+        os.chdir(root)
     if args.transport != "stdio" and args.host not in {"127.0.0.1", "::1", "localhost"} and not args.allow_unauthenticated_remote:
         raise SystemExit(
             "Remote MCP binding requires --allow-unauthenticated-remote and an authenticated reverse proxy. "
@@ -770,7 +922,8 @@ def main(argv: list[str] | None = None) -> None:
             "For a human-facing local evaluation flow, use `mare-workflow` or `mare-ui`.\n"
             "For a remote MCP endpoint behind an authenticated proxy, run `mare-mcp --transport http "
             "--host 0.0.0.0 --port 8000 --allow-unauthenticated-remote`.\n"
-            "For local MCP clients, use the example config in examples/mcp_stdio_config.json."
+            "For local MCP clients, run `mare connect` to print ready-to-paste config for Claude Code, Cursor, "
+            "VS Code, Codex, Gemini CLI, or Claude Desktop (see also examples/mcp_stdio_config.json)."
         )
     server = create_mcp_server()
     run = getattr(server, "run", None)
@@ -787,6 +940,10 @@ def main(argv: list[str] | None = None) -> None:
     _ALLOW_REMOTE_URL_FETCH = args.allow_remote_url_fetch
     show_banner = not args.no_banner
     settings = getattr(server, "settings", None)
+    if settings is not None and not hasattr(settings, "host"):
+        # mcp 2.x: transport options are passed to run() instead of living on settings.
+        _run_mcp_v2(server, args, transport)
+        return
     if settings is not None:
         settings.host = args.host
         settings.port = args.port
@@ -812,6 +969,55 @@ def main(argv: list[str] | None = None) -> None:
     invoke_run(transport="sse", show_banner=show_banner)
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _transport_security_v2(args: argparse.Namespace):
+    """Recreate MARE's DNS-rebinding policy for the mcp 2.x transport API.
+
+    Returns None (the SDK default: protection on for loopback binds) unless the user
+    disabled protection or allowed extra hosts/origins.
+    """
+    if not (args.disable_dns_rebinding_protection or args.allow_host or args.allow_origin):
+        return None
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    if args.disable_dns_rebinding_protection:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    hosts: list[str] = []
+    origins: list[str] = []
+    if args.host in _LOOPBACK_HOSTS:
+        hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+    hosts += [item for item in args.allow_host if item not in hosts]
+    origins += [item for item in args.allow_origin if item not in origins]
+    return TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins)
+
+
+def _run_mcp_v2(server, args: argparse.Namespace, transport: str) -> None:
+    if transport == "stdio":
+        server.run(transport="stdio")
+        return
+    security = _transport_security_v2(args)
+    if transport in ("http", "streamable-http"):
+        server.run(
+            transport="streamable-http",
+            host=args.host,
+            port=args.port,
+            streamable_http_path=args.path.rstrip("/") or "/mcp",
+            transport_security=security,
+        )
+        return
+    server.run(
+        transport="sse",
+        host=args.host,
+        port=args.port,
+        sse_path=args.sse_path.rstrip("/") or "/sse",
+        message_path=args.message_path if args.message_path.endswith("/") else f"{args.message_path}/",
+        transport_security=security,
+    )
+
+
 __all__ = [
     "create_mcp_server",
     "describe_corpus_tool",
@@ -822,6 +1028,7 @@ __all__ = [
     "query_corpora_tool",
     "query_corpus_tool",
     "query_pdf_tool",
+    "query_folder_tool",
     "query_pdf_url_tool",
     "search_objects_tool",
 ]

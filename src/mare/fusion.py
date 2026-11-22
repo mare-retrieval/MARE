@@ -4,6 +4,15 @@ from collections import defaultdict
 
 from mare.types import Modality, RetrievalHit
 
+# Text hits carry real document evidence (object content, snippet windows, citation
+# metadata). Image captions are weaker; layout hits only carry page-level labels such
+# as "procedure" or "table", which must never be shown to a user as the evidence.
+_EVIDENCE_PRIORITY = {
+    Modality.TEXT: 0,
+    Modality.IMAGE: 1,
+    Modality.LAYOUT: 2,
+}
+
 
 class WeightedScoreFusion:
     """Simple late fusion with modality-aware weights."""
@@ -16,57 +25,47 @@ class WeightedScoreFusion:
         }
 
     def fuse(self, results: dict[Modality, list[RetrievalHit]], top_k: int = 5) -> list[RetrievalHit]:
-        merged: dict[str, dict[str, object]] = defaultdict(
-            lambda: {
-                "score": 0.0,
-                "title": "",
-                "page": 0,
-                "reasons": [],
-                "snippet": "",
-                "page_image_path": "",
-                "highlight_image_path": "",
-                "object_id": "",
-                "object_type": "",
-                "metadata": {},
-            }
-        )
+        scores: dict[str, float] = defaultdict(float)
+        reasons: dict[str, list[str]] = defaultdict(list)
+        contributions: dict[str, list[tuple[Modality, RetrievalHit]]] = defaultdict(list)
 
         for modality, hits in results.items():
             weight = self.weights.get(modality, 1.0)
             for hit in hits:
-                bucket = merged[hit.doc_id]
-                bucket["score"] = float(bucket["score"]) + (hit.score * weight)
-                bucket["title"] = hit.title
-                bucket["page"] = hit.page
-                bucket["reasons"].append(f"{modality.value}:{hit.reason}")
-                if not bucket["snippet"] and hit.snippet:
-                    bucket["snippet"] = hit.snippet
-                if not bucket["page_image_path"] and hit.page_image_path:
-                    bucket["page_image_path"] = hit.page_image_path
-                if not bucket["highlight_image_path"] and hit.highlight_image_path:
-                    bucket["highlight_image_path"] = hit.highlight_image_path
-                if not bucket["object_id"] and hit.object_id:
-                    bucket["object_id"] = hit.object_id
-                if not bucket["object_type"] and hit.object_type:
-                    bucket["object_type"] = hit.object_type
-                bucket["metadata"] = hit.metadata
+                scores[hit.doc_id] += hit.score * weight
+                reasons[hit.doc_id].append(f"{modality.value}:{hit.reason}")
+                contributions[hit.doc_id].append((modality, hit))
 
         fused: list[RetrievalHit] = []
-        for doc_id, payload in merged.items():
+        for doc_id, items in contributions.items():
+            # Prefer evidence from the most evidence-bearing modality; break ties by score.
+            ordered = sorted(
+                items,
+                key=lambda item: (_EVIDENCE_PRIORITY.get(item[0], 1), -item[1].score),
+            )
+            primary = ordered[0][1]
+
+            def first(attribute: str) -> str:
+                for _, hit in ordered:
+                    value = getattr(hit, attribute)
+                    if value:
+                        return value
+                return ""
+
             fused.append(
                 RetrievalHit(
                     doc_id=doc_id,
-                    title=str(payload["title"]),
-                    page=int(payload["page"]),
+                    title=primary.title,
+                    page=primary.page,
                     modality=Modality.TEXT,
-                    score=round(float(payload["score"]), 4),
-                    reason=" | ".join(payload["reasons"]),
-                    snippet=str(payload["snippet"]),
-                    page_image_path=str(payload["page_image_path"]),
-                    highlight_image_path=str(payload["highlight_image_path"]),
-                    object_id=str(payload["object_id"]),
-                    object_type=str(payload["object_type"]),
-                    metadata=dict(payload["metadata"]),
+                    score=round(float(scores[doc_id]), 4),
+                    reason=" | ".join(reasons[doc_id]),
+                    snippet=first("snippet"),
+                    page_image_path=first("page_image_path"),
+                    highlight_image_path=first("highlight_image_path"),
+                    object_id=first("object_id"),
+                    object_type=first("object_type"),
+                    metadata=dict(primary.metadata),
                 )
             )
 

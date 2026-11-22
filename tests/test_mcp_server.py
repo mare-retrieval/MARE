@@ -529,3 +529,130 @@ def test_main_extends_allowed_hosts_and_origins(monkeypatch) -> None:
 
     assert "demo.ngrok-free.app:*" in fake_server.settings.transport_security.allowed_hosts
     assert "https://demo.ngrok-free.app" in fake_server.settings.transport_security.allowed_origins
+
+
+def test_query_folder_tool_returns_evidence_across_documents(tmp_path, monkeypatch) -> None:
+    from mare.mcp_server import query_folder_tool
+
+    monkeypatch.chdir(tmp_path)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "manual.md").write_text("# Manual\n\n## Charging\n\nIf the charging light stays off, reconnect the adapter.\n")
+    (docs / "notes.txt").write_text("Escalate only if the charging light still stays off.\n")
+
+    payload = query_folder_tool(folder_path=str(docs), query="charging light stays off")
+
+    assert {path.split("/")[-1] for path in payload["documents"]} == {"manual.md", "notes.txt"}
+    assert "charging light" in payload["results"][0]["snippet"]
+    assert payload["agent_contract"]["recommended_action"]
+
+
+def test_query_folder_tool_respects_remote_path_restriction(tmp_path, monkeypatch) -> None:
+    import mare.mcp_server as server_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(server_module, "_RESTRICT_LOCAL_PATHS", True)
+    outside = tmp_path.parent
+
+    try:
+        server_module.query_folder_tool(folder_path=str(outside), query="anything")
+    except ValueError as exc:
+        assert "restricted" in str(exc)
+    else:
+        raise AssertionError("Expected remote folder access outside the working directory to be refused.")
+
+
+def test_main_uses_mcp_v2_run_options(monkeypatch) -> None:
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    class _FakeV2Server:
+        def __init__(self) -> None:
+            self.settings = type("Settings", (), {"debug": False})()
+            self.calls = []
+
+        def run(self, transport, **kwargs) -> None:
+            self.calls.append({"transport": transport, **kwargs})
+
+    fake_server = _FakeV2Server()
+    monkeypatch.setattr("sys.stdin", _TTY())
+    monkeypatch.setattr("sys.stdout", _TTY())
+    monkeypatch.setattr("mare.mcp_server.create_mcp_server", lambda: fake_server)
+
+    main(["--transport", "http", "--port", "9100"])
+
+    assert fake_server.calls == [
+        {
+            "transport": "streamable-http",
+            "host": "127.0.0.1",
+            "port": 9100,
+            "streamable_http_path": "/mcp",
+            "transport_security": None,
+        }
+    ]
+
+
+def test_transport_security_v2_extends_loopback_defaults() -> None:
+    import pytest
+
+    pytest.importorskip("mcp.server.transport_security")
+    from mare.mcp_server import _transport_security_v2, build_arg_parser
+
+    args = build_arg_parser().parse_args(
+        ["--transport", "http", "--allow-host", "demo.ngrok-free.app:*", "--allow-origin", "https://demo.ngrok-free.app"]
+    )
+    security = _transport_security_v2(args)
+
+    assert security.enable_dns_rebinding_protection is True
+    assert "127.0.0.1:*" in security.allowed_hosts
+    assert "demo.ngrok-free.app:*" in security.allowed_hosts
+    assert "https://demo.ngrok-free.app" in security.allowed_origins
+
+    disabled = _transport_security_v2(build_arg_parser().parse_args(["--disable-dns-rebinding-protection"]))
+    assert disabled.enable_dns_rebinding_protection is False
+    assert _transport_security_v2(build_arg_parser().parse_args([])) is None
+
+
+def test_mcp_tools_declare_annotations() -> None:
+    import pytest
+
+    pytest.importorskip("mcp")
+    import anyio
+
+    from mare.mcp_server import create_mcp_server
+
+    tools = {tool.name: tool for tool in anyio.run(create_mcp_server().list_tools)}
+
+    def hint(name: str, camel: str, snake: str):
+        annotations = tools[name].annotations
+        return getattr(annotations, snake, None) if hasattr(annotations, snake) else getattr(annotations, camel)
+
+    assert "query_folder" in tools
+    assert hint("query_corpus", "readOnlyHint", "read_only_hint") is True
+    assert hint("query_folder", "readOnlyHint", "read_only_hint") is False
+    assert hint("ingest_pdf_url", "openWorldHint", "open_world_hint") is True
+
+
+def test_main_root_changes_working_directory(monkeypatch, tmp_path) -> None:
+    import os
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    class _FakeV2Server:
+        settings = type("Settings", (), {})()
+
+        def run(self, transport, **kwargs) -> None:
+            self.cwd = os.getcwd()
+
+    fake_server = _FakeV2Server()
+    monkeypatch.chdir(tmp_path.parent)
+    monkeypatch.setattr("sys.stdin", _TTY())
+    monkeypatch.setattr("sys.stdout", _TTY())
+    monkeypatch.setattr("mare.mcp_server.create_mcp_server", lambda: fake_server)
+
+    main(["--transport", "http", "--root", str(tmp_path)])
+
+    assert os.path.realpath(fake_server.cwd) == os.path.realpath(tmp_path)

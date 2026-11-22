@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,21 @@ from mare.objects import extract_document_objects
 from mare.types import Document
 
 
+def _quiet_pypdf_logging() -> None:
+    """Hide pypdf's per-font extraction chatter (for example "fontTools is required ...").
+
+    Those messages are emitted once per font and can bury MARE's output on ordinary PDFs.
+    Real errors are still logged. Set MARE_PDF_WARNINGS=1 to see everything.
+    """
+    import os
+
+    if os.environ.get("MARE_PDF_WARNINGS") == "1":
+        return
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+
 def _require_pypdf():
+    _quiet_pypdf_logging()
     try:
         from pypdf import PdfReader
     except ImportError as exc:

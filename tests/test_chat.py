@@ -92,7 +92,7 @@ class _FakeApp:
 
 class _WeakThenRescuedApp(_FakeApp):
     def explain(self, query: str, top_k: int = 3):
-        if query.startswith("exact evidence for"):
+        if not query.lower().startswith("what"):
             score = 0.91
             snippet = "The onboarding checklist requires completing payroll forms before system access."
             reason = "Matched exact evidence for onboarding checklist requirements."
@@ -487,7 +487,7 @@ def test_run_chat_shows_and_saves_evidence_rescue(monkeypatch, capsys, tmp_path:
 
     assert "Support: Strong support" in output
     assert "Agent action: answer_with_citations" in output
-    assert 'Evidence rescue: improved via "exact evidence for what onboarding items are required" (Strong support)' in output
+    assert 'Evidence rescue: improved via "onboarding items required" (Strong support)' in output
     assert "The onboarding checklist requires completing payroll forms before system access." in output
     assert payload["entries"][0]["top_result"]["support"] == "Strong support"
     assert payload["entries"][0]["top_result"]["evidence_quality"] == "High evidence quality"

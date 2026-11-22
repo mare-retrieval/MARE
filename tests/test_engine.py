@@ -230,3 +230,69 @@ def test_paraphrased_queries_match_instruction_text_via_aliases() -> None:
 
     assert explanation.fused_results[0].doc_id == "1"
     assert "alias matches" in explanation.fused_results[0].reason.lower()
+
+
+def test_fusion_prefers_text_evidence_over_layout_labels() -> None:
+    from mare.fusion import WeightedScoreFusion
+    from mare.types import Modality, RetrievalHit
+
+    layout = RetrievalHit(
+        doc_id="d1", title="Guide", page=1, modality=Modality.LAYOUT, score=0.9,
+        reason="Matched page signals: procedure", snippet="procedure", metadata={"signals": "procedure"},
+    )
+    text = RetrievalHit(
+        doc_id="d1", title="Guide", page=1, modality=Modality.TEXT, score=0.4,
+        reason="Matched text terms: adapter", snippet="Connect the AC adapter.",
+        object_id="d1:procedure:1", object_type="procedure", metadata={"line_start": "3"},
+    )
+
+    fused = WeightedScoreFusion().fuse({Modality.LAYOUT: [layout], Modality.TEXT: [text]})
+
+    assert fused[0].snippet == "Connect the AC adapter."
+    assert fused[0].metadata == {"line_start": "3"}
+    assert fused[0].object_id == "d1:procedure:1"
+
+
+def _page(doc_id: str, text: str, objects=None):
+    from mare.types import Document
+
+    return Document(
+        doc_id=doc_id, title=doc_id, page=1, text=text, image_caption="", layout_hints="",
+        page_image_path="", objects=objects or [], metadata={},
+    )
+
+
+def test_text_retriever_matches_inflected_forms() -> None:
+    from mare.retrievers.text import TextRetriever
+
+    documents = [
+        _page("brightness", "Adjust the screen brightness from the screen settings."),
+        _page("unlock", "Unlocking the screen."),
+    ]
+    hits = TextRetriever(documents).retrieve("how do I unlock the screen", top_k=2)
+
+    assert hits[0].doc_id == "unlock"
+
+
+def test_text_retriever_prefers_rare_terms_over_common_ones() -> None:
+    from mare.retrievers.text import TextRetriever
+
+    filler = "The computer manual describes the computer settings for the computer."
+    documents = [_page(f"common-{index}", filler) for index in range(6)]
+    documents.append(_page("bios", "Enter the BIOS setup screen by pressing F2 on the computer."))
+    hits = TextRetriever(documents).retrieve("computer bios", top_k=3)
+
+    assert hits[0].doc_id == "bios"
+
+
+def test_numbered_section_counts_as_steps() -> None:
+    from mare.retrievers.text import _object_bonus, _content_tokens
+    from mare.types import DocumentObject, ObjectType
+
+    section = DocumentObject(
+        object_id="s1", doc_id="d", page=1, object_type=ObjectType.SECTION,
+        content="Employee onboarding 1. Review the checklist. 2. Connect the adapter.",
+    )
+    _, reasons = _object_bonus(set(_content_tokens("onboarding steps")), section)
+
+    assert "numbered-steps boost" in reasons

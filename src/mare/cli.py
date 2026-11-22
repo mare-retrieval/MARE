@@ -21,6 +21,7 @@ def main() -> None:
         print("  mare ingest        Ingest a PDF into a MARE corpus")
         print("  mare eval          Run the eval harness")
         print("  mare mcp           Run the MCP server")
+        print("  mare connect       Print MCP config for Claude Code, Cursor, VS Code, Codex, and more")
         print("")
         print("Examples")
         print("  mare start")
@@ -29,6 +30,7 @@ def main() -> None:
         print("  mare chat --folder ./docs")
         print('  mare ask manual.pdf "how do I connect the AC adapter"')
         print("  mare workflow --pdf manual.pdf --query \"how do I connect the AC adapter\"")
+        print("  mare connect claude-code")
         return
 
     command, *rest = args
@@ -41,6 +43,7 @@ def main() -> None:
         "ingest": "mare.ingest",
         "eval": "mare.eval",
         "mcp": "mare.mcp_server",
+        "connect": "mare.connect",
     }
     target = dispatch.get(command)
     if target is None:

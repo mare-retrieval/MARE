@@ -51,6 +51,18 @@ _CONFLICT_SIGNAL_GROUPS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = (
 )
 
 
+
+_TEXT_ONLY_SUFFIXES = (".md", ".markdown", ".txt", ".docx")
+
+
+def _supports_visual_proof(result: dict[str, Any]) -> bool:
+    """Whether a page image/highlight could exist for this result's source format."""
+    if result.get("page_image_path"):
+        return True
+    metadata = result.get("metadata") or {}
+    source = str(result.get("source") or metadata.get("source") or result.get("title") or "").lower()
+    return not source.endswith(_TEXT_ONLY_SUFFIXES)
+
 def format_evidence_citation(
     *,
     title: str,
@@ -511,15 +523,13 @@ def _evidence_quality_payload(
             else "Top evidence is missing an inspectable citation.",
         }
     )
-    checks.append(
-        {
-            "name": "visual_proof",
-            "status": "pass" if best.get("highlight_image_path") else "warn",
-            "message": "Top evidence includes highlighted visual proof."
-            if best.get("highlight_image_path")
-            else "Top evidence has no highlighted visual proof.",
-        }
-    )
+    if best.get("highlight_image_path"):
+        visual_status, visual_message = "pass", "Top evidence includes highlighted visual proof."
+    elif _supports_visual_proof(best):
+        visual_status, visual_message = "warn", "Top evidence has no highlighted visual proof."
+    else:
+        visual_status, visual_message = "pass", "Top evidence is text-only; its snippet and line citation are the proof."
+    checks.append({"name": "visual_proof", "status": visual_status, "message": visual_message})
     provenance = best.get("provenance") or {}
     evidence_id = best.get("evidence_id") or provenance.get("evidence_id")
     checks.append(
@@ -665,7 +675,7 @@ def _evidence_gaps(
         gaps.append("Potentially conflicting evidence signals were detected; inspect the cited snippets before acting.")
 
     best = results[0]
-    if not best.get("highlight_image_path"):
+    if not best.get("highlight_image_path") and _supports_visual_proof(best):
         gaps.append("No highlighted visual proof is available for the top result.")
     if not best.get("snippet"):
         gaps.append("No exact snippet is available for the top result.")
