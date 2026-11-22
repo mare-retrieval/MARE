@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mare-retrieval"
-version = "0.4.8"
+version = "0.5.0"
 description = "Grounded document evidence engine for agents and developers that returns citations, snippets, highlights, source coverage, support strength, conflict hints, evidence gaps, and next questions."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,7 +32,7 @@ faiss = ["faiss-cpu>=1.8.0"]
 langchain = ["langchain-core>=0.3.0"]
 langgraph = ["langchain-core>=0.3.0", "langgraph>=0.3.0"]
 llamaindex = ["llama-index-core>=0.12.0"]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.0.0,<3"]
 paddleocr = ["paddleocr>=3.3.0"]
 sentence-transformers = ["sentence-transformers>=3.0.0"]
 surya = ["surya-ocr>=0.17.0", "pillow>=10.0.0"]
@@ -64,6 +64,7 @@ mare-ask = "mare.ask:main"
 mare-workflow = "mare.workflow:main"
 mare-ui = "mare.ui:main"
 mare-mcp = "mare.mcp_server:main"
+mare-connect = "mare.connect:main"
 
 [project.urls]
 Homepage = "https://github.com/mare-retrieval/MARE"
