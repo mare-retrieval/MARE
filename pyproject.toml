@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mare-retrieval"
-version = "0.5.0"
+version = "0.5.1"
 description = "Grounded document evidence engine for agents and developers that returns citations, snippets, highlights, source coverage, support strength, conflict hints, evidence gaps, and next questions."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,7 +21,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Text Processing :: Indexing"
 ]
-dependencies = ["pypdf>=4.0", "pypdfium2>=4.30.0"]
+dependencies = ["pypdf>=4.0", "pypdfium2>=4.30.0", "pillow>=10.0.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pillow>=10.0.0"]

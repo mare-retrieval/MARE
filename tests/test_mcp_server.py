@@ -656,3 +656,24 @@ def test_main_root_changes_working_directory(monkeypatch, tmp_path) -> None:
     main(["--transport", "http", "--root", str(tmp_path)])
 
     assert os.path.realpath(fake_server.cwd) == os.path.realpath(tmp_path)
+
+
+def test_mcp_tool_errors_reach_the_agent(tmp_path, monkeypatch) -> None:
+    import pytest
+
+    pytest.importorskip("mcp")
+    import anyio
+
+    from mare.mcp_server import create_mcp_server
+
+    monkeypatch.chdir(tmp_path)
+    server = create_mcp_server()
+
+    async def call():
+        return await server.call_tool("query_folder", {"folder_path": "missing", "query": "anything"})
+
+    with pytest.raises(Exception) as excinfo:
+        anyio.run(call)
+
+    # SDK 2.x hides messages of unexpected exceptions; agent-facing errors must stay readable.
+    assert "folder_path is not a directory: missing" in str(excinfo.value)
