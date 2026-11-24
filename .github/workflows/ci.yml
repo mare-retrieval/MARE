@@ -50,3 +50,14 @@ jobs:
           python -m venv /tmp/mare-wheel-smoke
           /tmp/mare-wheel-smoke/bin/pip install --no-deps dist/*.whl
           /tmp/mare-wheel-smoke/bin/python -c 'import importlib.metadata; import mare; print(importlib.metadata.version("mare-retrieval"))'
+      - name: Smoke-test a clean install on real documents
+        # Installs runtime dependencies exactly as users get them (no dev extras), so a
+        # missing runtime dependency fails here instead of on a user's first PDF.
+        run: |
+          python -m venv /tmp/mare-clean
+          /tmp/mare-clean/bin/pip install dist/*.whl
+          mkdir -p /tmp/mare-run && cp -r examples/sample_pdfs examples/mixed_docs /tmp/mare-run/
+          cd /tmp/mare-run
+          /tmp/mare-clean/bin/mare ask sample_pdfs/device_setup_guide.pdf "how do I connect the adapter"
+          /tmp/mare-clean/bin/mare workflow --folder mixed_docs --query "what should I do if the charging light stays off" --task brief --no-history
+          /tmp/mare-clean/bin/mare connect claude-code

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import os
 import ipaddress
@@ -570,6 +571,41 @@ def _tool_options(server, *, title: str, read_only: bool = True, open_world: boo
     return options
 
 
+def _tool_error_class():
+    for module_name in ("mcp.server.mcpserver.exceptions", "mcp.server.fastmcp.exceptions"):
+        try:
+            module = __import__(module_name, fromlist=["ToolError"])
+            return module.ToolError
+        except ImportError:
+            continue
+    return None
+
+
+# Errors caused by the agent's input or the local setup. Their messages tell the agent how
+# to recover ("folder_path is not a directory", "install the mcp extra"), so they are
+# surfaced verbatim. MCP SDK 2.x hides any other exception's message from the client.
+_AGENT_FACING_ERRORS = (ValueError, FileNotFoundError, NotADirectoryError, PermissionError, RuntimeError)
+
+
+def _register_tool(server, **options):
+    """Register a tool with annotations and agent-readable error messages."""
+    tool_error = _tool_error_class()
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except _AGENT_FACING_ERRORS as exc:
+                if tool_error is None or isinstance(exc, tool_error):
+                    raise
+                raise tool_error(str(exc)) from exc
+
+        return server.tool(**_tool_options(server, **options))(wrapper)
+
+    return decorator
+
+
 def create_mcp_server():
     server_class = _import_server_class()
     try:
@@ -598,7 +634,7 @@ def create_mcp_server():
             return PlainTextResponse("Not Found", status_code=404)
         return FileResponse(candidate)
 
-    @server.tool(**_tool_options(server, title='Index a PDF', read_only=False, open_world=False))
+    @_register_tool(server, title='Index a PDF', read_only=False, open_world=False)
     def ingest_pdf(
         pdf_path: str,
         output_path: str | None = None,
@@ -609,7 +645,7 @@ def create_mcp_server():
 
         return ingest_pdf_tool(pdf_path=pdf_path, output_path=output_path, reuse=reuse, parser=parser)
 
-    @server.tool(**_tool_options(server, title='Index a document', read_only=False, open_world=False))
+    @_register_tool(server, title='Index a document', read_only=False, open_world=False)
     def ingest_document(
         document_path: str,
         output_path: str | None = None,
@@ -620,7 +656,7 @@ def create_mcp_server():
 
         return ingest_document_tool(document_path=document_path, output_path=output_path, reuse=reuse, parser=parser)
 
-    @server.tool(**_tool_options(server, title='Ask a PDF', read_only=False, open_world=False))
+    @_register_tool(server, title='Ask a PDF', read_only=False, open_world=False)
     def query_pdf(
         pdf_path: str,
         query: str,
@@ -646,7 +682,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title="Ask a folder of documents", read_only=False, open_world=False))
+    @_register_tool(server, title="Ask a folder of documents", read_only=False, open_world=False)
     def query_folder(
         folder_path: str,
         query: str,
@@ -679,7 +715,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title='Ask a document', read_only=False, open_world=False))
+    @_register_tool(server, title='Ask a document', read_only=False, open_world=False)
     def query_document(
         document_path: str,
         query: str,
@@ -705,7 +741,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title='Index a PDF from a URL', read_only=False, open_world=True))
+    @_register_tool(server, title='Index a PDF from a URL', read_only=False, open_world=True)
     def ingest_pdf_url(
         pdf_url: str,
         output_path: str | None = None,
@@ -723,7 +759,7 @@ def create_mcp_server():
             parser=parser,
         )
 
-    @server.tool(**_tool_options(server, title='Ask a PDF at a URL', read_only=False, open_world=True))
+    @_register_tool(server, title='Ask a PDF at a URL', read_only=False, open_world=True)
     def query_pdf_url(
         pdf_url: str,
         query: str,
@@ -751,7 +787,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title='Ask an indexed corpus', read_only=True, open_world=False))
+    @_register_tool(server, title='Ask an indexed corpus', read_only=True, open_world=False)
     def query_corpus(
         corpus_path: str,
         query: str,
@@ -771,7 +807,7 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title='Ask several indexed corpora', read_only=True, open_world=False))
+    @_register_tool(server, title='Ask several indexed corpora', read_only=True, open_world=False)
     def query_corpora(
         corpus_paths: list[str],
         query: str,
@@ -791,19 +827,19 @@ def create_mcp_server():
             decomposition_timeout_seconds=decomposition_timeout_seconds,
         )
 
-    @server.tool(**_tool_options(server, title='List page evidence objects', read_only=True, open_world=False))
+    @_register_tool(server, title='List page evidence objects', read_only=True, open_world=False)
     def page_objects(corpus_path: str, doc_id: str, limit: int = 10) -> dict[str, Any]:
         """List extracted document objects for a page/document entry inside a MARE corpus."""
 
         return page_objects_tool(corpus_path=corpus_path, doc_id=doc_id, limit=limit)
 
-    @server.tool(**_tool_options(server, title='Describe an indexed corpus', read_only=True, open_world=False))
+    @_register_tool(server, title='Describe an indexed corpus', read_only=True, open_world=False)
     def describe_corpus(corpus_path: str, page_limit: int = 5, object_limit: int = 3) -> dict[str, Any]:
         """Summarize a MARE corpus so an agent can understand what pages, objects, and signals exist before querying."""
 
         return describe_corpus_tool(corpus_path=corpus_path, page_limit=page_limit, object_limit=object_limit)
 
-    @server.tool(**_tool_options(server, title='Search evidence objects', read_only=True, open_world=False))
+    @_register_tool(server, title='Search evidence objects', read_only=True, open_world=False)
     def search_objects(
         corpus_path: str,
         query: str,
